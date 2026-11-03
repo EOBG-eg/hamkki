@@ -6,21 +6,30 @@
   <p>상황만 알려주세요. 고르는 건 함끼가, 정하는 건 다 같이.</p>
 </section>
 
-{% if not regions %}
-<div class="alert alert-warning">
-  아직 식당 데이터가 없어요. 먼저 <code>python collect_restaurants.py 지역이름</code>을 실행해 주세요.
-</div>
-{% endif %}
-
-<form action="{{ url_for('recommend') }}" method="post" class="hk-form">
+<form action="{{ url_for('recommend') }}" method="post" class="hk-form" id="hk-form">
 
   <div class="hk-field">
-    <label class="hk-label" for="region">어디 근처에서 찾을까요?</label>
-    <select class="form-select hk-region" id="region" name="region">
-      {% for name, r in regions.items() %}
-      <option value="{{ name }}">📍 {{ name }}{% if r.count %} · {{ r.count }}곳{% endif %}</option>
+    <label class="hk-label" for="place_query">어디 근처에서 찾을까요?</label>
+    <div class="hk-search">
+      <span class="hk-search-icon" aria-hidden="true">📍</span>
+      <input type="text" id="place_query" name="place_query" class="form-control"
+             placeholder="역, 동네, 학교, 건물 이름" autocomplete="off" maxlength="40"
+             value="{{ default_place }}"
+             role="combobox" aria-expanded="false" aria-controls="hk-suggest" required>
+      <ul id="hk-suggest" class="hk-suggest" role="listbox" hidden></ul>
+    </div>
+    <input type="hidden" name="place_name" id="place_name">
+    <input type="hidden" name="place_x" id="place_x">
+    <input type="hidden" name="place_y" id="place_y">
+
+    {% if quick %}
+    <div class="hk-quick">
+      <span>바로 찾기</span>
+      {% for name in quick %}
+      <button type="button" class="hk-quick-chip" data-name="{{ name }}">{{ name }}</button>
       {% endfor %}
-    </select>
+    </div>
+    {% endif %}
   </div>
 
   <div class="hk-field">
@@ -78,7 +87,8 @@
       placeholder="예) 부모님 모시고 갈 조용한 한식집"></textarea>
   </div>
 
-  <button type="submit" class="hk-submit" {% if not regions %}disabled{% endif %}>함끼에게 맡겨보기</button>
+  <button type="submit" class="hk-submit" id="hk-submit">함끼에게 맡겨보기</button>
+  <p class="hk-submit-hint" id="hk-submit-hint" hidden>처음 찾는 지역이면 식당 정보를 모으느라 20~30초 걸릴 수 있어요.</p>
 </form>
 
 <script>
@@ -86,5 +96,82 @@
     const el = document.getElementById("people");
     el.value = Math.max(1, Math.min(30, (parseInt(el.value) || 1) + n));
   }
+
+  // ---------- 장소 검색 자동완성 ----------
+  const input = document.getElementById("place_query");
+  const list = document.getElementById("hk-suggest");
+  const hidden = {
+    name: document.getElementById("place_name"),
+    x: document.getElementById("place_x"),
+    y: document.getElementById("place_y"),
+  };
+  let timer = null;
+  let lastQuery = "";
+
+  function clearPicked() { hidden.name.value = hidden.x.value = hidden.y.value = ""; }
+
+  function closeList() {
+    list.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+  }
+
+  function pick(item) {
+    input.value = item.name;
+    hidden.name.value = item.name;
+    hidden.x.value = item.x;
+    hidden.y.value = item.y;
+    closeList();
+  }
+
+  function render(items) {
+    list.innerHTML = "";
+    if (!items.length) { closeList(); return; }
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const addr = document.createElement("span");
+      addr.textContent = item.address;
+      li.append(name, addr);
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); pick(item); });
+      list.appendChild(li);
+    });
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  input.addEventListener("input", () => {
+    clearPicked();                       // 글자를 바꾸면 이전에 고른 좌표는 버린다
+    const q = input.value.trim();
+    clearTimeout(timer);
+    if (q.length < 2) { closeList(); return; }
+    timer = setTimeout(async () => {     // 타자 칠 때마다 요청하지 않도록 잠깐 기다린다
+      lastQuery = q;
+      try {
+        const res = await fetch("/api/search-place?q=" + encodeURIComponent(q));
+        const items = await res.json();
+        if (q === lastQuery) render(items);
+      } catch (e) { closeList(); }
+    }, 300);
+  });
+  input.addEventListener("blur", () => setTimeout(closeList, 100));
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") closeList(); });
+
+  document.querySelectorAll(".hk-quick-chip").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      input.value = btn.dataset.name;
+      clearPicked();
+      closeList();
+    });
+  });
+
+  // 제출하면 버튼을 잠그고 기다리는 안내를 보여준다
+  document.getElementById("hk-form").addEventListener("submit", () => {
+    const btn = document.getElementById("hk-submit");
+    btn.disabled = true;
+    btn.textContent = "함끼가 고르는 중…";
+    document.getElementById("hk-submit-hint").hidden = false;
+  });
 </script>
 {% endblock %}

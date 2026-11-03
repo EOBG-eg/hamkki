@@ -12,16 +12,20 @@ Gemini가 상황과 분위기 문장을 해석해 3곳을 고르고 추천 이�
 
 import json
 import os
+import time
 import ssl
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 모델 이름은 바뀔 수 있어서, 앞에서부터 차례로 시도한다.
 # .env에 GEMINI_MODEL을 적으면 그 모델을 가장 먼저 시도한다. (Google AI Studio에서 확인)
-FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"]
+# 3.5 Flash-Lite: 빠르고(생각 최소) 사용량이 많은 작업용 → 20곳 중 3곳 고르기에 충분해서 가장 먼저 시도
+# 2.5 Flash는 새 사용자에게 더 이상 제공되지 않아서 뺐다 (2026-11 확인)
+FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.6-flash"]
 _env_model = os.environ.get("GEMINI_MODEL", "").strip()
 GEMINI_MODELS = ([_env_model] if _env_model else []) + [m for m in FALLBACK_MODELS if m != _env_model]
 
 PICK_COUNT = 3
+AI_TIMEOUT_MS = 20_000  # 모델 하나당 최대 대기 시간. 넘으면 다음 모델로 (화면이 멈추지 않게)
 
 # 개발 중에는 오류 원인을 화면에 보여준다. 배포할 때 .env에 HAMKKI_DEBUG=0 을 넣으면 숨겨진다.
 DEBUG = os.environ.get("HAMKKI_DEBUG", "1") == "1"
@@ -103,13 +107,15 @@ def recommend_with_ai(conditions, candidates):
         client = genai.Client(
             api_key=GEMINI_API_KEY,
             http_options=types.HttpOptions(
+                timeout=AI_TIMEOUT_MS,
                 client_args={"verify": ssl_context},
                 async_client_args={"verify": ssl_context},
             ),
         )
     except Exception as e:  # 아주 오래된 google-genai는 client_args를 모른다
         print(f"[AI] 인증서 설정을 적용하지 못해 기본 연결을 씁니다: {e}")
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        client = genai.Client(api_key=GEMINI_API_KEY,
+                              http_options=types.HttpOptions(timeout=AI_TIMEOUT_MS))
     prompt = _build_prompt(conditions, candidates)
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
@@ -118,7 +124,11 @@ def recommend_with_ai(conditions, candidates):
     )
 
     data, errors = None, []
+    started = time.time()
     for model in GEMINI_MODELS:  # 모델 하나가 안 되면 다음 모델로
+        if time.time() - started > 40:  # 전체로도 40초를 넘기지 않는다
+            errors.append("시간 초과로 나머지 모델은 건너뜀")
+            break
         try:
             response = client.models.generate_content(model=model, contents=prompt, config=config)
             data = json.loads(response.text)

@@ -1,9 +1,12 @@
 """
-함끼(Hamkki) - Flask 웹 서버 (2순위: 기본 뼈대)
+함끼(Hamkki) - Flask 웹 서버
 
-지금 단계에서는 AI 없이, 수집한 식당 데이터에서
-'정확한 조건'(음식 종류)과 '상황별 임시 규칙'으로 후보를 골라 보여준다.
-12주차에 Gemini를 붙이면 이 후보 목록을 AI에게 넘겨 3곳을 고르게 된다.
+흐름
+ 1) 사용자가 장소를 검색해서 고른다 (카카오 키워드 검색, 자동완성)
+ 2) 지금까지 모은 모든 지역 데이터에서 그 장소 반경 안의 식당을 찾는다
+ 3) 근처 데이터가 부족하면 그 자리에서 카카오로 자동 수집해 저장한다 (다음부터 재사용)
+ 4) '정확한 조건'(음식 종류)과 상황 규칙으로 후보 20곳을 추린다
+ 5) Gemini가 후보 중 3곳을 고르고 이유를 만든다 (실패하면 후보 목록을 그대로 보여줌)
 
 실행:  python app.py   →  브라우저에서 http://localhost:5000
 """
@@ -22,29 +25,36 @@ try:
 except ImportError:
     pass
 
+import sys
+import time
+
 from dotenv import load_dotenv
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 
 load_dotenv()  # 상위 폴더(hamkki)의 .env까지 찾아서 읽는다
 
 from ai_recommend import recommend_with_ai  # noqa: E402  (.env를 먼저 읽어야 키가 잡힘)
 
-app = Flask(__name__)
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)  # hamkki_app 의 한 단계 위 = hamkki
-DATA_DIR = os.path.join(PROJECT_DIR, "data")
-REGION_DIR = os.path.join(DATA_DIR, "regions")
-INDEX_FILE = os.path.join(DATA_DIR, "regions.json")  # 수집 스크립트가 만드는 지역 목록
 
-# 지역별 수집 이전에 만든 예전 파일 (있으면 '의정부역'으로 취급)
-LEGACY_FILE = os.path.join(DATA_DIR, "restaurants_raw.json")
-LEGACY_REGION = {"name": "의정부역", "x": 127.0463, "y": 37.7385}
+# 수집 스크립트(hamkki/collect_restaurants.py)의 함수를 웹에서도 같이 쓴다
+sys.path.insert(0, PROJECT_DIR)
+import collect_restaurants as collector  # noqa: E402
 
-MAX_CANDIDATES = 20  # 나중에 AI에게 넘길 후보 수
+app = Flask(__name__)
+
+MAX_CANDIDATES = 20     # AI에게 넘길 후보 수
+SEARCH_RADIUS_M = 1000  # 검색한 장소에서 이 거리 안의 식당만 후보로
+AUTO_TILE_DAILY_LIMIT = 60       # 하루에 새로 모을 수 있는 칸 수 (카카오 쿼터 보호)
+AUTO_TILES_PER_SEARCH = 9        # 검색 한 번에 새로 모을 수 있는 칸 수 (기다리는 시간 제한)
+_auto_collect_log = []           # 자동으로 칸을 모은 시각 기록
+
+# 예전 방식(장소 이름별 파일)으로 모은 데이터가 있으면 처음 한 번 칸 방식으로 옮긴다
+collector.migrate_legacy()
 
 # ---------------------------------------------------------------
-# 상황별 임시 규칙 (AI 연결 전까지만 사용)
+# 상황별 규칙 (AI에게 넘길 후보 20곳을 추릴 때, AI가 실패했을 때 사용)
 #  prefer: 우선 보여줄 종류 / avoid: 이 상황엔 빼는 종류
 #  ※ 이런 단순 규칙으로는 "조용한 곳" 같은 조건을 처리할 수 없다는 것이
 #    바로 AI가 필요한 이유이기도 하다.
@@ -78,44 +88,27 @@ SITUATIONS = {
 }
 
 TIME_SLOTS = ["점심", "저녁", "늦은 밤"]
+# 음식 종류 선택지 (카카오 분류 두 번째 단계)
+KINDS = ["한식", "중식", "일식", "양식", "아시아음식", "분식", "치킨", "술집", "패스트푸드",
+         "샤브샤브", "뷔페", "샐러드", "퓨전요리", "패밀리레스토랑"]
 BUDGETS = ["1만원 이하", "1~2만원", "2~4만원", "4만원 이상"]
 
 
 # ---------------------------------------------------------------
-# 데이터 불러오기 (지역별)
+# 데이터 (칸 단위 저장은 collect_restaurants.py가 담당)
 # ---------------------------------------------------------------
-_cache = {}  # 파일 경로 → (수정 시각, 내용). 파일이 바뀌었을 때만 다시 읽는다.
+def tiles_left_today():
+    """최근 24시간 동안 새로 모은 칸 수를 빼고 남은 한도"""
+    now = time.time()
+    _auto_collect_log[:] = [t for t in _auto_collect_log if now - t < 86400]
+    return max(0, AUTO_TILE_DAILY_LIMIT - len(_auto_collect_log))
 
 
-def _read_json(path):
-    mtime = os.path.getmtime(path)
-    cached = _cache.get(path)
-    if not cached or cached[0] != mtime:
-        with open(path, encoding="utf-8") as f:
-            _cache[path] = (mtime, json.load(f))
-    return _cache[path][1]
-
-
-def load_regions():
-    """
-    수집된 지역 목록을 돌려준다. {지역이름: {"x", "y", "file", "count", ...}}
-    지역별 수집 이전의 예전 파일만 있으면 그것을 '의정부역'으로 쓴다.
-    """
-    regions = {}
-    if os.path.exists(INDEX_FILE):
-        for name, info in _read_json(INDEX_FILE).items():
-            path = os.path.join(REGION_DIR, info["file"])
-            if os.path.exists(path):
-                regions[name] = {**info, "path": path}
-    if not regions and os.path.exists(LEGACY_FILE):
-        regions[LEGACY_REGION["name"]] = {**LEGACY_REGION, "path": LEGACY_FILE}
-    return regions
-
-
-def load_places(region):
-    """한 지역의 식당 목록을 읽는다."""
-    info = load_regions().get(region)
-    return _read_json(info["path"]) if info else []
+def quick_places(limit=6):
+    """첫 화면 '바로 찾기' 버튼: 많이 검색된 장소 순"""
+    places = collector.load_named_places()
+    ranked = sorted(places.items(), key=lambda kv: -kv[1].get("searches", 0))
+    return [name for name, _ in ranked[:limit]]
 
 
 def get_kind(place):
@@ -130,30 +123,19 @@ def get_detail(place):
     return parts[-1] if len(parts) > 2 else ""
 
 
-def distance_m(x1, y1, x2, y2):
-    """두 좌표 사이 거리(미터) - 하버사인 공식"""
-    r = 6371000
-    p1, p2 = math.radians(y1), math.radians(y2)
-    dp = math.radians(y2 - y1)
-    dl = math.radians(x2 - x1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return int(2 * r * math.asin(math.sqrt(a)))
-
-
 # ---------------------------------------------------------------
-# 후보 고르기 (AI 연결 전 버전)
+# 후보 고르기
 # ---------------------------------------------------------------
-def find_candidates(region, situation, kind_filter):
-    center = load_regions()[region]
+def find_candidates(nearby, situation, kind_filter):
+    """근처 식당 중에서 정확한 조건(음식 종류)과 상황 규칙으로 후보를 추린다."""
     rule = SITUATIONS[situation]
     results = []
-    for p in load_places(region):
+    for p, dist in nearby:
         kind = get_kind(p)
-        if kind_filter and kind != kind_filter:      # 정확한 조건: 음식 종류
+        if kind_filter and kind != kind_filter:        # 정확한 조건: 음식 종류
             continue
         if not kind_filter and kind in rule["avoid"]:  # 상황에 안 맞는 종류 제외
             continue
-        dist = distance_m(center["x"], center["y"], float(p["x"]), float(p["y"]))
         results.append({
             "id": p["id"],
             "name": p["place_name"],
@@ -165,7 +147,7 @@ def find_candidates(region, situation, kind_filter):
             "distance": dist,
             "preferred": kind in rule["prefer"],
         })
-    # 상황에 잘 맞는 종류 먼저, 그다음 지역 중심에서 가까운 순
+    # 상황에 잘 맞는 종류 먼저, 그다음 검색한 장소에서 가까운 순
     results.sort(key=lambda r: (not r["preferred"], r["distance"]))
     return results[:MAX_CANDIDATES]
 
@@ -175,18 +157,60 @@ def find_candidates(region, situation, kind_filter):
 # ---------------------------------------------------------------
 @app.route("/")
 def index():
-    regions = load_regions()
-    # 음식 종류 선택지는 모든 지역의 종류를 합쳐서 만든다
-    kinds = sorted({get_kind(p) for name in regions for p in load_places(name)})
+    quick = quick_places()
     return render_template(
         "index.html",
         situations=SITUATIONS,
         time_slots=TIME_SLOTS,
         budgets=BUDGETS,
-        kinds=kinds,
-        regions=regions,
-        place_count=sum(r.get("count", 0) or len(load_places(n)) for n, r in regions.items()),
+        kinds=KINDS,
+        quick=quick,
+        default_place=quick[0] if quick else "",
     )
+
+
+@app.route("/api/search-place")
+def api_search_place():
+    """검색창 자동완성. 카카오 키는 서버에만 있고 화면에는 결과만 보낸다."""
+    q = request.args.get("q", "").strip()[:40]
+    if len(q) < 2:
+        return jsonify([])
+    try:
+        return jsonify(collector.search_places(q))
+    except Exception as e:
+        print(f"[장소 검색 오류] {type(e).__name__}: {e}")
+        if app.debug:  # 개발 중에는 원인을 응답 헤더에 담는다
+            return jsonify([]), 502, {"X-Hamkki-Error": f"{type(e).__name__}: {e}"[:300].encode("ascii", "backslashreplace").decode()}
+        return jsonify([]), 502
+
+
+def resolve_place(form):
+    """
+    폼에서 검색한 장소를 좌표로 바꾼다.
+    자동완성에서 골랐으면 그 좌표를, 이름만 입력했으면 카카오 검색 1순위를 쓴다.
+    """
+    name = form.get("place_name", "").strip()[:40]
+    try:
+        x, y = float(form.get("place_x", "")), float(form.get("place_y", ""))
+        if name and 124 < x < 132 and 33 < y < 39:   # 한국 범위 안인지 확인
+            return {"name": name, "x": x, "y": y}
+    except ValueError:
+        pass
+
+    query = form.get("place_query", "").strip()[:40] or name
+    if not query:
+        return None
+    known = collector.load_named_places()
+    if query in known:                                # 전에 검색된 장소면 카카오를 다시 부르지 않음
+        return {"name": query, "x": known[query]["x"], "y": known[query]["y"]}
+    try:
+        found = collector.search_places(query, size=1)
+    except Exception as e:
+        print(f"[장소 검색 오류] {e}")
+        found = []
+    if found:
+        return {"name": found[0]["name"], "x": found[0]["x"], "y": found[0]["y"]}
+    return None
 
 
 @app.route("/recommend", methods=["POST"])
@@ -200,23 +224,47 @@ def recommend():
     except ValueError:
         people = 2
 
-    regions = load_regions()
-    region = request.form.get("region", "")
-    if region not in regions:
-        region = next(iter(regions), "")
+    place = resolve_place(request.form)
+    if not place:
+        return render_template("results.html", c={"region": request.form.get("place_query", ""),
+                               "situation": situation, "emoji": SITUATIONS[situation]["emoji"],
+                               "people": people, "time_slot": "", "budget": "", "kind": "", "wish": ""},
+                               candidates=[], ai=None, ai_error=None, has_data=True,
+                               place_not_found=True)
 
     conditions = {
-        "region": region,
+        "region": place["name"],
         "situation": situation,
         "emoji": SITUATIONS[situation]["emoji"],
         "people": people,
         "time_slot": request.form.get("time_slot", "저녁"),
         "budget": request.form.get("budget", ""),
         "kind": request.form.get("kind", ""),
-        "wish": request.form.get("wish", "").strip()[:200],  # 자유 문장 (AI 연결 후 사용)
+        "wish": request.form.get("wish", "").strip()[:200],
     }
 
-    candidates = find_candidates(region, situation, conditions["kind"]) if region else []
+    # 검색한 장소 주변 칸 중 아직 없는 칸만 그 자리에서 모은다 (다음 사람부터는 바로 사용)
+    collected_now = 0
+    collect_note = None
+    keys = collector.tiles_covering(place["x"], place["y"], SEARCH_RADIUS_M)
+    if collector.missing_tiles(keys, place["x"], place["y"], SEARCH_RADIUS_M):
+        allowed = min(AUTO_TILES_PER_SEARCH, tiles_left_today())
+        if allowed == 0:
+            collect_note = "오늘은 새 지역 수집 한도를 다 썼어요. 이미 모아둔 식당 안에서 찾았어요."
+        else:
+            try:
+                new_tiles, collected_now, skipped = collector.ensure_area(
+                    place["x"], place["y"], SEARCH_RADIUS_M, max_new_tiles=allowed, verbose=False)
+                _auto_collect_log.extend([time.time()] * new_tiles)
+                if skipped:
+                    collect_note = "주변 일부는 아직 못 모았어요. 잠시 후 다시 검색하면 더 넓게 찾아드려요."
+            except Exception as e:
+                print(f"[자동 수집 오류] {e}")
+                collect_note = "이 지역 식당 정보를 새로 모으지 못했어요. 이미 모아둔 식당 안에서 찾았어요."
+    collector.remember_place(place["name"], place["x"], place["y"])
+    nearby = collector.places_near(place["x"], place["y"], SEARCH_RADIUS_M)
+
+    candidates = find_candidates(nearby, situation, conditions["kind"])
 
     # AI 추천: 실패하면 ai_result는 None이고, 화면은 후보 목록을 그대로 보여준다
     ai_result, ai_error = recommend_with_ai(conditions, candidates) if candidates else (None, None)
@@ -227,7 +275,9 @@ def recommend():
         candidates=candidates,
         ai=ai_result,
         ai_error=ai_error,
-        has_data=bool(regions),
+        has_data=True,
+        collected_now=collected_now,
+        collect_note=collect_note,
     )
 
 

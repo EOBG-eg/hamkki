@@ -207,6 +207,49 @@ body {
 .hk-more ul { padding-left: 18px; margin-top: 8px; }
 .hk-more li span { color: #a89c92; }
 
-/* 지역 선택 */
-.hk-region { font-weight: 700; font-size: 1.05rem; }
-.hk-submit:disabled { opacity: .45; }
+/* 장소 검색 */
+.hk-search { position: relative; }
+.hk-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.hk-search .form-control { padding-left: 38px; font-weight: 700; font-size: 1.05rem; }
+.hk-suggest {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  background: var(--hk-card);
+  border: 1px solid var(--hk-line);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(43, 36, 32, .12);
+}
+.hk-suggest li { padding: 9px 10px; border-radius: 8px; cursor: pointer; display: flex; flex-direction: column; }
+.hk-suggest li:hover { background: var(--hk-accent-soft); }
+.hk-suggest strong { font-size: .95rem; }
+.hk-suggest span { font-size: .78rem; color: var(--hk-muted); }
+
+.hk-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.hk-quick > span { font-size: .78rem; color: var(--hk-muted); margin-right: 2px; }
+.hk-quick-chip {
+  border: 1px solid var(--hk-line);
+  background: var(--hk-card);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: .8rem;
+  color: var(--hk-ink);
+}
+.hk-quick-chip:hover { border-color: var(--hk-accent); color: var(--hk-accent); }
+
+.hk-submit:disabled { opacity: .6; }
+.hk-submit-hint { font-size: .8rem; color: var(--hk-muted); text-align: center; margin: -8px 0 0; }
+
+.hk-collected {
+  background: #e8f4ea;
+  color: #23633a;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: .85rem;
+  margin-bottom: 14px;
+}

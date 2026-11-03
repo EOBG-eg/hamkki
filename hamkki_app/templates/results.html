@@ -14,7 +14,20 @@
   {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
 </section>
 
-{% if not has_data %}
+{% if collected_now %}
+  <div class="hk-collected">🆕 {{ c.region }} 근처는 처음이라 식당 {{ collected_now }}곳을 새로 모았어요. 다음부터는 바로 찾아드려요.</div>
+{% endif %}
+{% if collect_note %}
+  <div class="hk-notice">{{ collect_note }}</div>
+{% endif %}
+
+{% if place_not_found %}
+  <div class="hk-empty">
+    <p>‘{{ c.region }}’ 위치를 찾지 못했어요.<br>역 이름이나 동네 이름으로 다시 검색해 주세요.</p>
+    <a href="{{ url_for('index') }}" class="hk-link">다시 검색하기</a>
+  </div>
+
+{% elif not has_data %}
   <div class="alert alert-warning">식당 데이터가 없어요. 먼저 수집 스크립트를 실행해 주세요.</div>
 
 {% elif not candidates %}
@@ -64,7 +77,7 @@
   {# ---------- AI 실패: 후보 목록으로 대체 ---------- #}
   <div class="hk-notice">
     {% if ai_error %}{{ ai_error }}<br>{% endif %}
-    대신 상황과 음식 종류, {{ c.region }}에서의 거리로 고른 후보를 보여드려요.
+    대신 상황과 음식 종류, {{ c.region }}에서 가까운 순으로 고른 후보를 보여드려요.
   </div>
 
   <p class="hk-count">후보 {{ candidates|length }}곳</p>
