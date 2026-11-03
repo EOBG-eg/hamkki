@@ -45,6 +45,16 @@ REQUEST_DELAY = 0.2     # 요청 사이 대기 시간(초), 너무 빠르게 호
 OUTPUT_DIR = "data"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "restaurants_raw.json")
 
+# 추천 대상에서 뺄 종류 (category_name의 두 번째 단계 기준)
+# 함께 앉아 식사하기 어려운 업종이라 제외
+EXCLUDE_KINDS = {"간식", "식품판매", "도시락"}
+
+
+def get_kind(place):
+    """'음식점 > 한식 > 국밥' 에서 두 번째 단계('한식')를 꺼낸다."""
+    parts = [s.strip() for s in place.get("category_name", "").split(">")]
+    return parts[1] if len(parts) > 1 else "기타"
+
 
 # ---------------------------------------------------------------
 # 카카오 API 호출
@@ -121,20 +131,21 @@ def main():
     results = {}
     collect_cell(AREA["min_x"], AREA["min_y"], AREA["max_x"], AREA["max_y"], results)
 
-    places = list(results.values())
+    all_places = list(results.values())
+    places = [p for p in all_places if get_kind(p) not in EXCLUDE_KINDS]
+    excluded = len(all_places) - len(places)
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(places, f, ensure_ascii=False, indent=2)
 
     # 간단한 결과 점검
     print("\n========== 수집 결과 ==========")
+    print(f"수집 {len(all_places)}곳 중 {excluded}곳 제외 ({', '.join(sorted(EXCLUDE_KINDS))})")
     print(f"총 {len(places)}곳 → {OUTPUT_FILE} 에 저장")
 
     # category_name 예: "음식점 > 한식 > 육류,고기"  → 두 번째 단계로 묶어서 집계
-    kinds = Counter()
-    for p in places:
-        parts = [s.strip() for s in p.get("category_name", "").split(">")]
-        kinds[parts[1] if len(parts) > 1 else "기타"] += 1
+    kinds = Counter(get_kind(p) for p in places)
 
     print("\n[종류별 개수]")
     for kind, count in kinds.most_common():
