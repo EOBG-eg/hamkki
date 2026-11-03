@@ -33,10 +33,13 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)  # hamkki_app 의 한 단계 위 = hamkki
-DATA_FILE = os.path.join(PROJECT_DIR, "data", "restaurants_raw.json")
+DATA_DIR = os.path.join(PROJECT_DIR, "data")
+REGION_DIR = os.path.join(DATA_DIR, "regions")
+INDEX_FILE = os.path.join(DATA_DIR, "regions.json")  # 수집 스크립트가 만드는 지역 목록
 
-# 의정부역 대략 위치 (경도, 위도) - 거리 계산 기준점
-STATION = {"name": "의정부역", "x": 127.0463, "y": 37.7385}
+# 지역별 수집 이전에 만든 예전 파일 (있으면 '의정부역'으로 취급)
+LEGACY_FILE = os.path.join(DATA_DIR, "restaurants_raw.json")
+LEGACY_REGION = {"name": "의정부역", "x": 127.0463, "y": 37.7385}
 
 MAX_CANDIDATES = 20  # 나중에 AI에게 넘길 후보 수
 
@@ -79,21 +82,40 @@ BUDGETS = ["1만원 이하", "1~2만원", "2~4만원", "4만원 이상"]
 
 
 # ---------------------------------------------------------------
-# 데이터 불러오기
+# 데이터 불러오기 (지역별)
 # ---------------------------------------------------------------
-_cache = {"mtime": None, "places": []}
+_cache = {}  # 파일 경로 → (수정 시각, 내용). 파일이 바뀌었을 때만 다시 읽는다.
 
 
-def load_places():
-    """수집 파일을 읽는다. 파일이 바뀌었을 때만 다시 읽는다."""
-    if not os.path.exists(DATA_FILE):
-        return []
-    mtime = os.path.getmtime(DATA_FILE)
-    if _cache["mtime"] != mtime:
-        with open(DATA_FILE, encoding="utf-8") as f:
-            _cache["places"] = json.load(f)
-        _cache["mtime"] = mtime
-    return _cache["places"]
+def _read_json(path):
+    mtime = os.path.getmtime(path)
+    cached = _cache.get(path)
+    if not cached or cached[0] != mtime:
+        with open(path, encoding="utf-8") as f:
+            _cache[path] = (mtime, json.load(f))
+    return _cache[path][1]
+
+
+def load_regions():
+    """
+    수집된 지역 목록을 돌려준다. {지역이름: {"x", "y", "file", "count", ...}}
+    지역별 수집 이전의 예전 파일만 있으면 그것을 '의정부역'으로 쓴다.
+    """
+    regions = {}
+    if os.path.exists(INDEX_FILE):
+        for name, info in _read_json(INDEX_FILE).items():
+            path = os.path.join(REGION_DIR, info["file"])
+            if os.path.exists(path):
+                regions[name] = {**info, "path": path}
+    if not regions and os.path.exists(LEGACY_FILE):
+        regions[LEGACY_REGION["name"]] = {**LEGACY_REGION, "path": LEGACY_FILE}
+    return regions
+
+
+def load_places(region):
+    """한 지역의 식당 목록을 읽는다."""
+    info = load_regions().get(region)
+    return _read_json(info["path"]) if info else []
 
 
 def get_kind(place):
@@ -121,16 +143,17 @@ def distance_m(x1, y1, x2, y2):
 # ---------------------------------------------------------------
 # 후보 고르기 (AI 연결 전 버전)
 # ---------------------------------------------------------------
-def find_candidates(situation, kind_filter):
+def find_candidates(region, situation, kind_filter):
+    center = load_regions()[region]
     rule = SITUATIONS[situation]
     results = []
-    for p in load_places():
+    for p in load_places(region):
         kind = get_kind(p)
         if kind_filter and kind != kind_filter:      # 정확한 조건: 음식 종류
             continue
         if not kind_filter and kind in rule["avoid"]:  # 상황에 안 맞는 종류 제외
             continue
-        dist = distance_m(STATION["x"], STATION["y"], float(p["x"]), float(p["y"]))
+        dist = distance_m(center["x"], center["y"], float(p["x"]), float(p["y"]))
         results.append({
             "id": p["id"],
             "name": p["place_name"],
@@ -142,7 +165,7 @@ def find_candidates(situation, kind_filter):
             "distance": dist,
             "preferred": kind in rule["prefer"],
         })
-    # 상황에 잘 맞는 종류 먼저, 그다음 역에서 가까운 순
+    # 상황에 잘 맞는 종류 먼저, 그다음 지역 중심에서 가까운 순
     results.sort(key=lambda r: (not r["preferred"], r["distance"]))
     return results[:MAX_CANDIDATES]
 
@@ -152,16 +175,17 @@ def find_candidates(situation, kind_filter):
 # ---------------------------------------------------------------
 @app.route("/")
 def index():
-    places = load_places()
-    kinds = sorted({get_kind(p) for p in places})
+    regions = load_regions()
+    # 음식 종류 선택지는 모든 지역의 종류를 합쳐서 만든다
+    kinds = sorted({get_kind(p) for name in regions for p in load_places(name)})
     return render_template(
         "index.html",
         situations=SITUATIONS,
         time_slots=TIME_SLOTS,
         budgets=BUDGETS,
         kinds=kinds,
-        place_count=len(places),
-        station=STATION["name"],
+        regions=regions,
+        place_count=sum(r.get("count", 0) or len(load_places(n)) for n, r in regions.items()),
     )
 
 
@@ -176,7 +200,13 @@ def recommend():
     except ValueError:
         people = 2
 
+    regions = load_regions()
+    region = request.form.get("region", "")
+    if region not in regions:
+        region = next(iter(regions), "")
+
     conditions = {
+        "region": region,
         "situation": situation,
         "emoji": SITUATIONS[situation]["emoji"],
         "people": people,
@@ -186,7 +216,7 @@ def recommend():
         "wish": request.form.get("wish", "").strip()[:200],  # 자유 문장 (AI 연결 후 사용)
     }
 
-    candidates = find_candidates(situation, conditions["kind"])
+    candidates = find_candidates(region, situation, conditions["kind"]) if region else []
 
     # AI 추천: 실패하면 ai_result는 None이고, 화면은 후보 목록을 그대로 보여준다
     ai_result, ai_error = recommend_with_ai(conditions, candidates) if candidates else (None, None)
@@ -197,8 +227,7 @@ def recommend():
         candidates=candidates,
         ai=ai_result,
         ai_error=ai_error,
-        station=STATION["name"],
-        has_data=bool(load_places()),
+        has_data=bool(regions),
     )
 
 

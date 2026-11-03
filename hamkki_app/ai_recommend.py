@@ -32,7 +32,7 @@ SYSTEM_INSTRUCTION = f"""너는 '함끼'라는 식당 추천 서비스의 추천
 규칙:
 1. 반드시 후보 목록 안에서만 {PICK_COUNT}곳을 고른다. 목록에 없는 식당을 지어내지 않는다.
 2. 상황(데이트, 가족, 친구, 회식, 혼밥)과 인원, 시간대, 예산, 사용자가 적은 분위기 문장을 함께 고려한다.
-3. 후보 정보는 이름, 종류, 세부 종류, 역까지 거리뿐이다. 이 정보로 알 수 없는 것
+3. 후보 정보는 이름, 종류, 세부 종류, 지역 중심까지 거리뿐이다. 이 정보로 알 수 없는 것
    (실제 분위기, 영업시간, 가격, 좌석)을 사실처럼 단정하지 않는다.
    추정할 때는 "~일 가능성이 높아요", "~하기 좋은 메뉴예요"처럼 표현한다.
 4. reason은 이 상황의 사용자에게 건네는 친근한 존댓말 한두 문장으로 쓴다. 60자 안팎.
@@ -65,10 +65,11 @@ def _build_prompt(conditions, candidates):
     lines = []
     for c in candidates:
         detail = f"/{c['detail']}" if c["detail"] else ""
-        lines.append(f"- id={c['id']} | {c['name']} | {c['kind']}{detail} | 역에서 {c['distance']}m")
+        lines.append(f"- id={c['id']} | {c['name']} | {c['kind']}{detail} | 중심에서 {c['distance']}m")
 
     wish = conditions["wish"] or "(없음)"
     return f"""[사용자 조건]
+지역: {conditions.get('region', '')} 근처
 상황: {conditions['situation']}
 인원: {conditions['people']}명
 시간대: {conditions['time_slot']}

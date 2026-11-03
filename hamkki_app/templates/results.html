@@ -4,6 +4,7 @@
 
 <section class="hk-summary">
   <div class="hk-summary-tags">
+    <span>📍 {{ c.region }}</span>
     <span>{{ c.emoji }} {{ c.situation }}</span>
     <span>{{ c.people }}명</span>
     <span>{{ c.time_slot }}</span>
@@ -63,7 +64,7 @@
   {# ---------- AI 실패: 후보 목록으로 대체 ---------- #}
   <div class="hk-notice">
     {% if ai_error %}{{ ai_error }}<br>{% endif %}
-    대신 상황과 음식 종류, {{ station }}까지 거리로 고른 후보를 보여드려요.
+    대신 상황과 음식 종류, {{ c.region }}에서의 거리로 고른 후보를 보여드려요.
   </div>
 
   <p class="hk-count">후보 {{ candidates|length }}곳</p>

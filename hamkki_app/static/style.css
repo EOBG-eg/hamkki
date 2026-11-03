@@ -206,3 +206,7 @@ body {
 .hk-more summary { cursor: pointer; }
 .hk-more ul { padding-left: 18px; margin-top: 8px; }
 .hk-more li span { color: #a89c92; }
+
+/* 지역 선택 */
+.hk-region { font-weight: 700; font-size: 1.05rem; }
+.hk-submit:disabled { opacity: .45; }
