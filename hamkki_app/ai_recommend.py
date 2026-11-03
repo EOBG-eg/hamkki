@@ -12,6 +12,7 @@ Gemini가 상황과 분위기 문장을 해석해 3곳을 고르고 추천 이�
 
 import json
 import os
+import ssl
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 모델 이름은 바뀔 수 있어서, 앞에서부터 차례로 시도한다.
@@ -41,6 +42,23 @@ SYSTEM_INSTRUCTION = f"""너는 '함끼'라는 식당 추천 서비스의 추천
 출력 형식:
 {{"summary": "추천 전체를 한 문장으로", "picks": [{{"id": "후보 id", "reason": "추천 이유"}}]}}
 """
+
+
+def _make_ssl_context():
+    """
+    Gemini 연결에 쓸 인증서 설정.
+
+    Gemini 패키지는 기본으로 자체 인증서 목록(certifi)만 쓴다. 그래서 학교·회사 네트워크처럼
+    HTTPS를 중간에서 검사하는 곳에서는 CERTIFICATE_VERIFY_FAILED 오류가 난다.
+    운영체제가 믿는 인증서 목록을 쓰도록 바꾸면 해결된다. 보안 검사를 끄는 것이 아니다.
+      - truststore가 설치돼 있으면 그것을 쓰고
+      - 없으면 파이썬 기본 설정을 쓴다(Windows에서는 Windows 인증서 저장소를 읽는다)
+    """
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def _build_prompt(conditions, candidates):
@@ -79,7 +97,18 @@ def recommend_with_ai(conditions, candidates):
     except ImportError:
         return None, "google-genai 패키지가 설치되지 않았어요. (pip install -U google-genai)"
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    ssl_context = _make_ssl_context()
+    try:
+        client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options=types.HttpOptions(
+                client_args={"verify": ssl_context},
+                async_client_args={"verify": ssl_context},
+            ),
+        )
+    except Exception as e:  # 아주 오래된 google-genai는 client_args를 모른다
+        print(f"[AI] 인증서 설정을 적용하지 못해 기본 연결을 씁니다: {e}")
+        client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = _build_prompt(conditions, candidates)
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,

@@ -12,6 +12,16 @@ import json
 import math
 import os
 
+# 학교·회사 네트워크처럼 HTTPS를 중간에서 검사하는 곳에서는
+# 파이썬 기본 인증서 목록으로는 연결이 막힌다(CERTIFICATE_VERIFY_FAILED).
+# truststore를 쓰면 운영체제(Windows)가 믿는 인증서 목록을 그대로 써서 해결된다.
+# 보안 검사를 끄는 게 아니라 '어떤 인증서를 믿을지'를 OS에 맡기는 방식이다.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 from dotenv import load_dotenv
 from flask import Flask, render_template, request
 
