@@ -16,6 +16,7 @@
     python collect_restaurants.py 강남역 건대입구역     → 여러 곳 한 번에
     python collect_restaurants.py 수원역 --radius 1500  → 반경 1.5km
     python collect_restaurants.py 의정부역 --refresh    → 이미 있는 칸도 새로 수집(최신화)
+    python collect_restaurants.py --area 의정부시       → 시 전체(미리 정한 사각형 범위)를 칸으로 수집
 """
 
 import argparse
@@ -52,6 +53,13 @@ LAT_STEP = 0.009
 LNG_STEP = 0.0113
 
 DEFAULT_RADIUS_M = 1000
+
+# 시·구 전체를 모을 때 쓰는 사각형 범위 (서쪽 경도, 남쪽 위도, 동쪽 경도, 북쪽 위도)
+# 행정 경계가 아니라 그 지역을 감싸는 사각형이라 이웃 지역(양주, 서울 도봉 등) 가장자리도 조금 들어간다.
+# 산·논밭 칸은 식당 0곳으로 금방 끝나므로 호출량은 크지 않다.
+AREAS = {
+    "의정부시": (127.000, 37.685, 127.135, 37.790),
+}
 
 PAGE_SIZE = 15          # 카테고리 검색 한 페이지 최대 개수
 MAX_PAGES = 3           # 15 x 3 = 45개 (노출 가능한 최대치)
@@ -216,9 +224,17 @@ def _rect_minus(outer, inner):
 # ---------------------------------------------------------------
 # 카카오 API 호출
 # ---------------------------------------------------------------
-def kakao_get(url, params):
+def kakao_get(url, params, retries=3):
     headers = {"Authorization": f"KakaoAK {KAKAO_REST_KEY}"}
-    response = requests.get(url, headers=headers, params=params, timeout=10)
+    # 학교 네트워크에서는 가끔 연결이 중간에 끊긴다(SSLEOFError 등) → 잠깐 쉬고 다시 시도
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            break
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == retries - 1:
+                raise
+            time.sleep(1 + attempt * 2)
     if response.status_code == 429:
         raise RuntimeError("카카오 API 쿼터를 초과했습니다(429). 내일 다시 시도하세요.")
     if response.status_code != 200:
@@ -226,16 +242,38 @@ def kakao_get(url, params):
     return response.json()
 
 
-def search_places(query, size=6):
-    """검색창 자동완성용: 장소 이름으로 후보 위치 몇 개를 찾는다."""
-    data = kakao_get(KEYWORD_URL, {"query": query, "size": size})
+ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
+REGION_SUFFIXES = ("동", "읍", "면", "리", "가", "구", "시", "군")
+
+
+def search_regions(query, size=3):
+    """
+    '민락동', '노원구'처럼 동네·행정구역 이름이면 주소 검색으로 그 지역 중심 좌표를 찾는다.
+    (키워드 검색만 쓰면 '민락동' → 동네 안의 유적지 '송산사지'가 1순위로 나오는 문제가 있었다)
+    """
+    if not query.endswith(REGION_SUFFIXES):
+        return []
+    data = kakao_get(ADDRESS_URL, {"query": query, "size": size})
     return [{
+        "name": d["address_name"].split()[-1],   # '경기 의정부시 민락동' → '민락동'
+        "address": d["address_name"],           # 부산 민락동과 구분되도록 전체 주소를 같이 보여줌
+        "category": "동네",
+        "x": float(d["x"]),
+        "y": float(d["y"]),
+    } for d in data.get("documents", []) if d.get("address_type") == "REGION"]
+
+
+def search_places(query, size=6):
+    """검색창 자동완성용: 동네 이름이면 동네 결과를 먼저, 그 뒤에 장소(역, 건물 등) 결과를 붙인다."""
+    regions = search_regions(query)
+    data = kakao_get(KEYWORD_URL, {"query": query, "size": size})
+    return (regions + [{
         "name": d["place_name"],
         "address": d.get("road_address_name") or d.get("address_name", ""),
         "category": d.get("category_group_name", ""),
         "x": float(d["x"]),
         "y": float(d["y"]),
-    } for d in data.get("documents", [])]
+    } for d in data.get("documents", [])])[:size]
 
 
 def find_center(region_name):
@@ -466,13 +504,41 @@ def collect_region(region_name, radius_m, refresh=False):
     return True
 
 
+def collect_area(area_name, refresh=False):
+    """미리 정한 사각형 범위 안의 칸을 모두 수집한다. 중간에 멈춰도 다시 실행하면 이어서 한다."""
+    w, s, e, n = AREAS[area_name]
+    keys = [f"{iy}_{ix}"
+            for iy in range(math.floor(s / LAT_STEP), math.floor(n / LAT_STEP) + 1)
+            for ix in range(math.floor(w / LNG_STEP), math.floor(e / LNG_STEP) + 1)]
+    todo = keys if refresh else missing_tiles(keys)
+    print(f"\n========== [{area_name}] 전체 ==========")
+    print(f"칸 {len(keys)}개 중 {len(todo)}개 수집 예정 (이미 있는 {len(keys) - len(todo)}개는 건너뜀)")
+    added, failed, started = 0, [], time.time()
+    for i, key in enumerate(todo, 1):
+        if refresh:
+            _forget_tile(key)
+        try:
+            added += collect_tile(key, verbose=False)
+        except requests.RequestException as e:  # 네트워크 오류: 이 칸만 건너뛰고 계속 (다시 실행하면 이 칸만 모음)
+            failed.append(key)
+            print(f"  [{i}/{len(todo)}] 칸 {key}: 네트워크 오류로 건너뜀 ({type(e).__name__})")
+            continue
+        count = load_tile_index()[key]["count"]
+        print(f"  [{i}/{len(todo)}] 칸 {key}: {count}곳 · 누적 새 식당 {added}곳 · {int(time.time() - started)}초")
+    if failed:
+        print(f"⚠ 칸 {len(failed)}개는 네트워크 오류로 못 모았어요. 같은 명령을 한 번 더 실행하면 그 칸만 모아요.")
+    total = sum(load_tile_index().get(k, {}).get("count", 0) for k in keys)
+    print(f"[{area_name}] 완료: 범위 안 식당 {total}곳 (이번에 새로 {added}곳)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="함끼 식당 자동 수집 (격자 방식)")
-    parser.add_argument("regions", nargs="*", default=["의정부역"],
+    parser.add_argument("regions", nargs="*", default=[],
                         help="수집할 지역 이름들 (예: 홍대입구역 강남역)")
     parser.add_argument("--radius", type=int, default=DEFAULT_RADIUS_M,
                         help=f"지역 중심에서의 반경(미터), 기본 {DEFAULT_RADIUS_M}")
     parser.add_argument("--refresh", action="store_true", help="이미 있는 칸도 새로 수집")
+    parser.add_argument("--area", choices=sorted(AREAS), help="시·구 전체 수집 (예: 의정부시)")
     args = parser.parse_args()
 
     if not KAKAO_REST_KEY:
@@ -480,6 +546,10 @@ def main():
         return
 
     migrate_legacy()
+    if args.area:
+        collect_area(args.area, refresh=args.refresh)
+    elif not args.regions:
+        args.regions = ["의정부역"]   # 아무것도 안 적으면 예전처럼 의정부역
     radius = max(300, min(3000, args.radius))
     for r in args.regions:
         collect_region(r, radius, refresh=args.refresh)

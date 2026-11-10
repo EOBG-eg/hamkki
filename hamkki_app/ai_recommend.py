@@ -40,8 +40,14 @@ SYSTEM_INSTRUCTION = f"""너는 '함끼'라는 식당 추천 서비스의 추천
    (실제 분위기, 영업시간, 가격, 좌석)을 사실처럼 단정하지 않는다.
    추정할 때는 "~일 가능성이 높아요", "~하기 좋은 메뉴예요"처럼 표현한다.
 4. reason은 이 상황의 사용자에게 건네는 친근한 존댓말 한두 문장으로 쓴다. 60자 안팎.
-5. 투자, 건강 같은 조언은 하지 않는다.
-6. 출력은 JSON만 쓴다.
+5. [추가 요청]이 있으면 사용자가 앞선 추천을 보고 덧붙인 조건이다. 마지막 요청을 가장 중요하게 반영하고,
+   앞의 요청과 원래 조건도 계속 지킨다. [직전 추천]과 [그 전에 보여준 곳]에 있는 식당은 다시 고르지 않는다.
+   사용자가 다시 보고 싶다고 명시했거나, 남은 후보로는 요청을 도저히 맞출 수 없을 때만 예외로 한다.
+   이때 summary에는 이번 요청을 어떻게 반영했는지 그 요청에 맞는 말로 한 문장 쓴다.
+   (예시 문장을 그대로 따라 쓰지 말 것. 어떤 메뉴·특징 쪽으로 바꿨는지 구체적으로)
+   가격 정보는 없으므로 "저렴한" 요청은 메뉴 종류로 추정하고 단정하지 않는다.
+6. 투자, 건강 같은 조언은 하지 않는다.
+7. 출력은 JSON만 쓴다.
 
 출력 형식:
 {{"summary": "추천 전체를 한 문장으로", "picks": [{{"id": "후보 id", "reason": "추천 이유"}}]}}
@@ -62,7 +68,15 @@ def _make_ssl_context():
         import truststore
         return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     except ImportError:
-        return ssl.create_default_context()
+        import sys
+        print(f"[AI] truststore가 없는 파이썬으로 실행 중이에요: {sys.executable}\n"
+              f"     venv를 켜고 실행하거나 'python -m pip install truststore'로 설치해 주세요.")
+        ctx = ssl.create_default_context()  # Windows 인증서 저장소도 함께 읽는다
+        # 파이썬 3.13부터 켜진 '엄격 검사'는 학교 검사 장비 인증서의 표기 형식
+        # (Basic Constraints not marked critical)까지 거부한다.
+        # 인증서 체인 검증은 그대로 하고, 이 형식 검사 하나만 예전 기준으로 되돌린다.
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+        return ctx
 
 
 def _build_prompt(conditions, candidates):
@@ -72,6 +86,13 @@ def _build_prompt(conditions, candidates):
         lines.append(f"- id={c['id']} | {c['name']} | {c['kind']}{detail} | 중심에서 {c['distance']}m")
 
     wish = conditions["wish"] or "(없음)"
+    extra = ""
+    if conditions.get("followups"):
+        extra += "\n[추가 요청] (아래로 갈수록 최근)\n" + "\n".join(f"- {t}" for t in conditions["followups"]) + "\n"
+    if conditions.get("previous"):
+        extra += "\n[직전 추천]\n" + "\n".join(f"- {n}" for n in conditions["previous"]) + "\n"
+    if conditions.get("earlier"):
+        extra += "\n[그 전에 보여준 곳]\n" + "\n".join(f"- {n}" for n in conditions["earlier"]) + "\n"
     return f"""[사용자 조건]
 지역: {conditions.get('region', '')} 근처
 상황: {conditions['situation']}
@@ -80,7 +101,7 @@ def _build_prompt(conditions, candidates):
 1인 예산: {conditions['budget'] or '상관없음'}
 원하는 음식 종류: {conditions['kind'] or '상관없음'}
 분위기 요청: {wish}
-
+{extra}
 [후보 목록 {len(candidates)}곳]
 {chr(10).join(lines)}
 """

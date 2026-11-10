@@ -25,16 +25,20 @@
 hamkki/                       ← 이 폴더에서 Claude Code를 연다
 ├── .env                      ← API 키 (절대 커밋·출력 금지)
 ├── collect_restaurants.py    ← 식당 수집 (명령줄 + app.py가 import해서 사용)
+├── render.yaml               ← Render 배포 설정 (Blueprint)
+├── .python-version           ← Render 파이썬 버전
 ├── data/                     ← 수집 데이터 (.gitignore, GitHub에 없음)
 │   ├── tiles/<칸번호>.json   ← 약 1km × 1km 칸 하나의 식당 목록
 │   ├── tiles.json            ← 수집한 칸 목록 (count, collected_at, partial, covered)
 │   ├── places.json           ← 검색된 장소 이름·좌표·검색 횟수 ('바로 찾기' 버튼)
+│   ├── votes/<투표ID>.json   ← 동행자 투표 (후보 3곳 + 표)
 │   └── regions/ 등           ← 예전 방식 데이터 (이미 칸으로 이전됨, 지워도 됨)
 └── hamkki_app/
     ├── app.py                ← Flask 서버 (실행 파일)
     ├── ai_recommend.py       ← Gemini 추천
-    ├── requirements.txt      ← flask, requests, python-dotenv, google-genai, truststore
-    ├── templates/            ← base.html, index.html(입력), results.html(결과)
+    ├── vote_store.py         ← 투표 저장 (배포 때 이 파일만 Postgres로 교체)
+    ├── requirements.txt      ← flask, requests, python-dotenv, google-genai, truststore, gunicorn
+    ├── templates/            ← base.html, index.html(입력), results.html(결과), vote.html(투표), _map.html(지도)
     └── static/style.css
 ```
 
@@ -49,16 +53,19 @@ python app.py                → http://localhost:5000
 ```
 
 수집은 hamkki 폴더에서: `python collect_restaurants.py 의정부역 회룡역 --radius 1500` (`--refresh`로 최신화)
+시 전체: `python collect_restaurants.py --area 의정부시` (범위는 `AREAS` 사각형, 같은 칸 방식. 네트워크 오류 칸은 건너뛰고 재실행 시 그 칸만 수집)
 
 패키지 설치는 항상 `python -m pip install ...` (실행 중인 파이썬에 설치되도록).
 
 ## 동작 구조
 
-1. 사용자가 장소를 검색 → `/api/search-place`가 카카오 키워드 검색으로 자동완성 (카카오 키는 서버에만)
+1. 사용자가 장소를 검색 → `/api/search-place`가 자동완성 (동·구 이름이면 주소 검색 결과를 먼저, 그 뒤 키워드 검색. 카카오 키는 서버에만)
 2. `/recommend`: 장소 좌표 → 반경 1km를 덮는 칸 확인 → 없는 칸만 그 자리에서 카카오로 수집 (검색당 최대 9칸, 하루 60칸)
 3. 반경 1km 식당 → 상황 규칙(`SITUATIONS`의 prefer/avoid)과 음식 종류로 후보 20곳
 4. Gemini가 후보 중 3곳 + 추천 이유를 JSON으로 → 서버가 ID가 실제 후보인지 검사 → 결과 카드
 5. AI가 실패하면 화면이 깨지지 않고 후보 20곳 목록과 실패 이유를 보여줌
+6. 재추천: 결과 화면에서 "더 저렴한 곳으로" 등 조건을 덧붙이면(최대 3번) 처음 조건 + 덧붙인 요청 + 지금까지 보여준 식당(`seen`)을 AI에 넘겨 다시 고름. 보여준 식당은 서버가 AI 후보에서 제외
+7. '친구들과 투표로 정하기' → `/vote/create`(추천 내용은 `SECRET_KEY`로 서명해 위조 방지) → `/vote/<id>` 공유 링크. 로그인 없이 이름+투표, 브라우저 쿠키(`hk_voter`)나 같은 이름이면 이전 표를 교체
 
 수집 세부:
 - 카카오 카테고리 검색(FD6)은 한 번에 최대 45곳 → 넘치면 구역을 4칸으로 재귀 분할 (최소 0.0005도)
@@ -73,6 +80,8 @@ AI 세부 (`ai_recommend.py`):
 
 ## 꼭 지킬 것
 
+- 앱은 반드시 venv 파이썬으로 실행 (다른 파이썬은 truststore가 없어 Gemini가 인증서 오류. 대비책으로 `VERIFY_X509_STRICT`만 해제)
+- 시험은 실제 `data/`를 오염시킬 수 있다 (`remember_place`가 장소를 기록함). 시험 후 `data/places.json` 확인
 - `.env` 내용을 읽어서 출력하거나 대화에 쓰지 않는다. `.env`, `data/`, `__pycache__`는 커밋 금지.
 - **학교 네트워크는 HTTPS를 중간에서 검사한다** → `CERTIFICATE_VERIFY_FAILED`. 해결은 `truststore`(OS 인증서 사용)로 한다. `verify=False` 등 인증서 검사를 끄는 방법은 쓰지 않는다. Gemini 클라이언트에는 `HttpOptions(client_args={"verify": ssl_context})`로 truststore 컨텍스트를 넘긴다.
 - 네이버·카카오 웹페이지 크롤링 금지 (약관 위반·차단). 공식 API만 쓴다. 리뷰 원문 저장 금지.
@@ -82,15 +91,14 @@ AI 세부 (`ai_recommend.py`):
 
 ## 진행 현황 (2026-11-10 기준)
 
-완료: 카카오 자동 수집(격자 칸), 장소 검색·자동완성·자동 수집, 조건 입력 화면, Gemini AI 추천 + 안전장치
+완료: 카카오 자동 수집(격자 칸), 장소 검색·자동완성·자동 수집, 조건 입력 화면, Gemini AI 추천 + 안전장치, 결과 화면 카카오 지도(번호 핀·카드 연동·https 상세/길찾기 링크, `templates/_map.html`), 공유 링크 + 동행자 투표, 조건 덧붙여 재추천, 배포 설정 파일(render.yaml), README, 검증 기록 초안(`docs/검증기록_초안.md`), data 백업(`Documents\hamkki_data_backup_20261110.zip`)
 데이터: 의정부역·홍대입구역·강남역 일대 약 6,300곳 + 상우고등학교 주변
 
 다음 할 일 (우선순위 순):
-1. 결과 화면에 카카오 지도 (JavaScript SDK, `KAKAO_JS_KEY`, 도메인 등록: `http://localhost:5000`, 배포 시 Render 주소 추가). 앱 미설치 사용자도 되도록 외부 링크는 `https://` 웹 주소만.
-2. 공유 링크 + 동행자 투표 (로그인 없음, 이름 입력 또는 브라우저 표시로 중복 투표 방지) ← 서비스의 차별점
-3. 조건 덧붙여 재추천 ("더 저렴한 곳으로")
-4. 식당 분위기 AI 태깅 (정해진 태그 목록 안에서만, 근거 없으면 "정보 없음"), 이후 방문자 태그로 보정
-5. Render 배포: 무료 서버는 파일이 재시작 때 사라지므로 칸·투표 데이터를 Postgres로 이전 (Render 무료 Postgres는 30일 만료 주의), `gunicorn`, 환경변수 등록, `HAMKKI_DEBUG=0`
+1. 식당 분위기 AI 태깅 (정해진 태그 목록 안에서만, 근거 없으면 "정보 없음"), 이후 방문자 태그로 보정
+2. Postgres 이전: Render 무료 서버는 재시작·잠듦(15분 무접속) 때 파일이 사라져 칸·투표 데이터가 날아간다. 무료 Postgres는 30일 만료라 **12주차(11/16~22)에 생성**해야 15주차(12/7~13)까지 유지됨. `vote_store.py`와 수집 저장 함수만 교체
+
+일정: 11주차 재추천(완료)·1차 배포(Postgres 없이) → 12주차 Postgres → 13주차 실사용 시험(태깅은 여유 있을 때만) → 14주차 데모데이(새 기능 금지, 리허설, 쿼터 확인) → 15주차 발표·검증 기록·README
 
 지역 미리 수집 우선순위: 의정부시 전체 → 노원·도봉·수유·창동 → 서울 약속 장소(건대·성수·잠실·신촌·혜화 등) → 경기·인천 중심가 → 지방 대도시. 전국 일괄 수집은 하지 않는다(호출량·용량·약관). 나머지는 검색 시 자동 수집에 맡긴다.
 
@@ -99,4 +107,5 @@ AI 세부 (`ai_recommend.py`):
 - 카카오 API에는 분위기·리뷰·영업시간이 없다 → AI는 이름·종류·거리로만 추정 (프롬프트에서 단정 금지)
 - 폐업 식당 미처리 (추천 직전 최종 3곳 재확인, 공공데이터 일반음식점 인허가 대조 검토 중)
 - 카카오 로컬 API 데이터를 서버에 저장해도 되는 범위는 카카오 데브톡 확인 필요
+- 투표는 같은 이름을 적으면 다른 사람 표를 바꿀 수 있다 (로그인 없는 구조의 한계, 친구끼리 쓰는 용도라 허용)
 - 웹 자동 수집 하루 한도는 메모리에만 있어 앱을 재시작하면 초기화됨

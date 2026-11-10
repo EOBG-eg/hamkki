@@ -1,0 +1,23 @@
+# Render 배포 설정 (Blueprint)
+# Render 대시보드 → New → Blueprint → 이 GitHub 저장소를 고르면 아래대로 서버가 만들어진다.
+services:
+  - type: web
+    name: hamkki
+    runtime: python
+    plan: free
+    # 저장소 맨 위(hamkki)에서 실행한다. app.py가 위 폴더의 collect_restaurants.py를 쓰기 때문.
+    buildCommand: pip install -r hamkki_app/requirements.txt
+    # 워커 1개 + 스레드 4개: 투표 파일 잠금과 하루 수집 한도가 한 프로세스 안에서만 지켜지므로 워커는 1개로 둔다.
+    # timeout 120초: 새 지역 자동 수집 + AI 추천(최대 40초)까지 기다릴 수 있게.
+    startCommand: gunicorn --chdir hamkki_app app:app --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: KAKAO_REST_KEY
+        sync: false          # 값은 Render 화면에서 직접 입력 (GitHub에 올리지 않음)
+      - key: KAKAO_JS_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true  # Render가 무작위 값을 만들어 줌
+      - key: HAMKKI_DEBUG
+        value: "0"           # 배포에서는 오류 원인을 화면에 숨긴다

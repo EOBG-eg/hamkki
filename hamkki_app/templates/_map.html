@@ -1,0 +1,94 @@
+{# 결과 화면 카카오 지도. results.html에서 include 한다. map_data, kakao_js_key 필요 #}
+{% if map_data %}
+<section class="hk-map-wrap">
+  <div id="hk-map" class="hk-map" aria-label="추천 식당 지도"></div>
+  <p id="hk-map-msg" class="hk-map-msg" hidden></p>
+</section>
+
+<script>
+(function () {
+  var data = {{ map_data|tojson }};
+  var key = {{ kakao_js_key|tojson }};
+  var box = document.getElementById("hk-map");
+  var msg = document.getElementById("hk-map-msg");
+
+  // 지도를 못 띄워도 아래 카드 목록은 그대로 쓸 수 있게, 지도 칸만 숨기고 안내한다
+  function fail(text) {
+    box.hidden = true;
+    msg.textContent = text;
+    msg.hidden = false;
+  }
+
+  if (!key) { fail("지도 키(KAKAO_JS_KEY)가 설정되지 않아 지도를 숨겼어요."); return; }
+
+  var sdk = document.createElement("script");
+  sdk.src = "https://dapi.kakao.com/v2/maps/sdk.js?autoload=false&appkey=" + encodeURIComponent(key);
+  // 10초 안에 지도가 안 뜨면 포기 (네트워크가 느리거나 도메인 미등록일 때 화면이 멈춘 것처럼 보이지 않게)
+  var timer = setTimeout(function () { fail("지도를 불러오지 못했어요. 아래 목록에서 확인해 주세요."); }, 10000);
+  sdk.onerror = function () { clearTimeout(timer); fail("지도를 불러오지 못했어요. 아래 목록에서 확인해 주세요."); };
+  sdk.onload = function () {
+    if (!window.kakao || !kakao.maps) { clearTimeout(timer); fail("지도를 불러오지 못했어요. (카카오 앱 설정의 사이트 도메인을 확인해 주세요)"); return; }
+    kakao.maps.load(function () { clearTimeout(timer); draw(); });
+  };
+  document.head.appendChild(sdk);
+
+  function draw() {
+    var center = new kakao.maps.LatLng(data.center.y, data.center.x);
+    var map = new kakao.maps.Map(box, { center: center, level: 4 });
+    map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
+    var bounds = new kakao.maps.LatLngBounds();
+    bounds.extend(center);
+
+    // 검색한 장소 (기준점)
+    var here = document.createElement("div");
+    here.className = "hk-pin-here";
+    here.textContent = "📍 " + data.center.name;   // textContent: 이름에 태그가 섞여도 그대로 글자로만 표시
+    new kakao.maps.CustomOverlay({ map: map, position: center, content: here, yAnchor: 1.3, zIndex: 1 });
+
+    // 식당 핀 (번호 = 카드 순서)
+    var pins = {};
+    data.points.forEach(function (p) {
+      var pos = new kakao.maps.LatLng(p.y, p.x);
+      bounds.extend(pos);
+      var pin = document.createElement("button");
+      pin.type = "button";
+      pin.className = "hk-pin";
+      var num = document.createElement("span");
+      num.textContent = p.rank;
+      pin.appendChild(num);
+      pin.title = p.name + " · " + p.kind;
+      pin.addEventListener("click", function () { focusCard(p.id); });
+      new kakao.maps.CustomOverlay({ map: map, position: pos, content: pin, yAnchor: 1, zIndex: 3 });
+      pins[p.id] = { pin: pin, pos: pos };
+    });
+    map.setBounds(bounds, 40, 40, 40, 40);
+
+    function highlight(id) {
+      Object.keys(pins).forEach(function (k) { pins[k].pin.classList.toggle("is-active", k === id); });
+      document.querySelectorAll(".hk-card.is-active").forEach(function (el) { el.classList.remove("is-active"); });
+      var card = document.getElementById("place-" + id);
+      if (card) card.classList.add("is-active");
+    }
+
+    // 핀을 누르면 해당 카드로 스크롤
+    function focusCard(id) {
+      highlight(id);
+      var card = document.getElementById("place-" + id);
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    // 카드의 '지도에서 보기'를 누르면 지도로 올라가서 그 핀으로 이동
+    document.querySelectorAll("[data-map-focus]").forEach(function (btn) {
+      btn.hidden = false;
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-map-focus");
+        if (!pins[id]) return;
+        highlight(id);
+        map.panTo(pins[id].pos);
+        box.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  }
+})();
+</script>
+{% endif %}

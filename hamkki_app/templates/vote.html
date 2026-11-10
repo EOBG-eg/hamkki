@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}함께 정하기{% endblock %}
+{% block content %}
+
+{% if not vote %}
+  <div class="hk-empty">
+    <p>{{ error or "투표를 찾을 수 없어요." }}</p>
+    <a href="{{ url_for('index') }}" class="hk-link">새로 추천받기</a>
+  </div>
+{% else %}
+
+<section class="hk-summary">
+  <div class="hk-summary-tags">
+    <span>📍 {{ c.region }}</span>
+    <span>{{ c.emoji }} {{ c.situation }}</span>
+    <span>{{ c.people }}명</span>
+    {% if c.time_slot %}<span>{{ c.time_slot }}</span>{% endif %}
+    {% if c.budget %}<span>{{ c.budget }}</span>{% endif %}
+    {% if c.kind %}<span>{{ c.kind }}</span>{% endif %}
+  </div>
+  {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
+</section>
+
+{# ---------- 공유 ---------- #}
+<section class="hk-share {% if is_new %}is-new{% endif %}">
+  {% if is_new %}<p class="hk-share-title">🎉 투표를 만들었어요! 같이 갈 사람들에게 링크를 보내 주세요.</p>
+  {% else %}<p class="hk-share-title">👥 같이 갈 사람에게 링크 보내기</p>{% endif %}
+  <div class="hk-share-row">
+    <input type="text" class="form-control" id="hk-share-url" value="{{ share_url }}" readonly>
+    <button type="button" class="hk-share-btn" id="hk-share-btn">공유</button>
+  </div>
+  <p class="hk-share-done" id="hk-share-done" hidden>링크를 복사했어요. 카톡 대화방에 붙여넣어 주세요.</p>
+</section>
+
+{# ---------- 현재 결과 ---------- #}
+<section class="hk-ai">
+  <p class="hk-ai-label">🗳️ 어디로 갈까요?</p>
+  {% if total == 0 %}
+    <p class="hk-vote-status">아직 아무도 투표하지 않았어요. 첫 표를 던져 주세요!</p>
+  {% elif leaders|length == 1 %}
+    {% for o in vote.options if o.id == leaders[0] %}
+    <p class="hk-vote-status"><strong>{{ o.name }}</strong>이(가) {{ counts[o.id]|length }}표로 앞서고 있어요 · 총 {{ total }}명 참여</p>
+    {% endfor %}
+  {% else %}
+    <p class="hk-vote-status">{{ leaders|length }}곳이 동점이에요 · 총 {{ total }}명 참여</p>
+  {% endif %}
+  {% if just_voted and mine %}<p class="hk-vote-mine">✅ {{ mine.name }}님의 표가 반영됐어요. 다시 고르면 표가 바뀌어요.</p>{% endif %}
+</section>
+
+{% include "_map.html" %}
+
+{% if error %}<div class="hk-notice">{{ error }}</div>{% endif %}
+
+<form method="post" class="hk-vote-form">
+  <ol class="hk-list hk-picks">
+    {% for o in vote.options %}
+    {% set n = counts[o.id]|length %}
+    <li class="hk-card hk-pick hk-vote-card {% if o.id in leaders %}is-leader{% endif %}" id="place-{{ o.id }}">
+      <span class="hk-rank">{{ loop.index }}</span>
+      <label class="hk-vote-pick">
+        <input type="radio" name="pick" value="{{ o.id }}" required
+               {% if mine and mine.pick == o.id %}checked{% endif %}>
+        <span class="hk-vote-check" aria-hidden="true"></span>
+        <div class="hk-card-top">
+          <h2>{{ o.name }}{% if o.id in leaders %} 👑{% endif %}</h2>
+          <span class="hk-dist">{{ o.distance }}m</span>
+        </div>
+        <div class="hk-card-meta">
+          <span class="hk-badge hk-badge-fit">{{ o.kind }}</span>
+          {% if o.detail %}<span class="hk-detail">{{ o.detail }}</span>{% endif %}
+        </div>
+        {% if o.reason %}<p class="hk-reason">{{ o.reason }}</p>{% endif %}
+      </label>
+
+      <div class="hk-bar" role="img" aria-label="{{ n }}표">
+        <span style="width: {{ (n * 100 / total) | round | int if total else 0 }}%"></span>
+      </div>
+      <p class="hk-voters">
+        <strong>{{ n }}표</strong>
+        {% if n %}· {{ counts[o.id]|join(", ") }}{% endif %}
+      </p>
+
+      <p class="hk-addr">{{ o.address }}</p>
+      <div class="hk-links">
+        <button type="button" class="hk-link hk-link-btn" data-map-focus="{{ o.id }}" hidden>지도에서 보기</button>
+        {% if o.url %}<a href="{{ o.url }}" target="_blank" rel="noopener" class="hk-link">상세 정보 →</a>{% endif %}
+        {% if o.route_url %}<a href="{{ o.route_url }}" target="_blank" rel="noopener" class="hk-link">길찾기 →</a>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <label class="hk-label" for="hk-voter-name">내 이름</label>
+  <input type="text" class="form-control" id="hk-voter-name" name="name" maxlength="20" required
+         placeholder="예: 유빈" value="{{ form_name }}" autocomplete="nickname">
+  <button type="submit" class="hk-submit">{{ "표 바꾸기" if mine else "투표하기" }}</button>
+  <p class="hk-submit-hint">로그인 없이 이름만 적으면 돼요. 같은 이름이나 같은 기기로 다시 투표하면 이전 표가 바뀌어요.</p>
+</form>
+
+<a href="{{ request.path }}" class="hk-back">↻ 결과 새로고침</a>
+<a href="{{ url_for('index') }}" class="hk-back" style="margin-left: 14px;">새로 추천받기</a>
+
+<script>
+(function () {
+  var btn = document.getElementById("hk-share-btn");
+  var input = document.getElementById("hk-share-url");
+  var done = document.getElementById("hk-share-done");
+  btn.addEventListener("click", function () {
+    var url = input.value;
+    // 휴대폰에서는 공유창(카톡 등)을, 안 되는 브라우저에서는 링크 복사를 쓴다
+    if (navigator.share) {
+      navigator.share({ title: "함끼 · 어디로 갈까요?", text: "같이 갈 식당 투표해 줘!", url: url })
+        .catch(function () {});   // 사용자가 공유창을 닫은 경우는 무시
+      return;
+    }
+    function copied() { done.hidden = false; }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(copied, function () { input.select(); });
+    } else {
+      input.select();
+      try { if (document.execCommand("copy")) copied(); } catch (e) {}
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

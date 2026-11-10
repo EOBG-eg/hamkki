@@ -253,3 +253,119 @@ body {
   font-size: .85rem;
   margin-bottom: 14px;
 }
+
+/* 결과 화면 지도 */
+.hk-map-wrap { margin: 0 0 14px; }
+.hk-map {
+  width: 100%;
+  height: 260px;
+  border-radius: 16px;
+  border: 1px solid var(--hk-line);
+  overflow: hidden;
+  background: var(--hk-line);
+}
+.hk-map-msg { font-size: .8rem; color: var(--hk-muted); margin: 0; }
+.hk-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 0;   /* 물방울 모양 핀 */
+  transform: rotate(-45deg);
+  border: 2px solid #fff;
+  background: var(--hk-accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: .85rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+  padding: 0;
+  cursor: pointer;
+}
+.hk-pin span { display: inline-block; transform: rotate(45deg); }  /* 숫자는 반대로 돌려 똑바로 */
+.hk-pin.is-active { background: var(--hk-ink); transform: rotate(-45deg) scale(1.15); }
+.hk-pin-here {
+  background: var(--hk-card);
+  border: 1.5px solid var(--hk-ink);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: .78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .15);
+}
+.hk-card.is-active { border-color: var(--hk-accent); box-shadow: 0 0 0 3px var(--hk-accent-soft); }
+.hk-links { display: flex; flex-wrap: wrap; gap: 14px; }
+.hk-link-btn { background: none; border: 0; padding: 0; }
+
+/* 동행자 투표 */
+.hk-vote-make { margin-top: 20px; display: flex; flex-direction: column; gap: 14px; }
+.hk-share {
+  background: var(--hk-card);
+  border: 1px solid var(--hk-line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.hk-share.is-new { border-color: var(--hk-accent); background: var(--hk-accent-soft); }
+.hk-share-title { font-weight: 700; font-size: .9rem; margin: 0 0 8px; }
+.hk-share-row { display: flex; gap: 8px; }
+.hk-share-row .form-control { font-size: .8rem; min-width: 0; }
+.hk-share-btn {
+  border: 0;
+  border-radius: 10px;
+  background: var(--hk-accent);
+  color: #fff;
+  font-weight: 700;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+.hk-share-done { font-size: .8rem; color: var(--hk-accent); margin: 6px 0 0; }
+
+.hk-vote-status { margin: 0; font-size: .95rem; }
+.hk-vote-mine { margin: 6px 0 0; font-size: .85rem; color: #23633a; }
+
+.hk-vote-form { display: flex; flex-direction: column; gap: 8px; }
+.hk-vote-form .hk-list { margin-bottom: 10px; }
+.hk-vote-form .hk-submit { margin-top: 10px; }
+.hk-vote-form .hk-submit-hint { margin: 2px 0 0; }
+.hk-vote-pick { display: block; cursor: pointer; padding-right: 30px; position: relative; }
+.hk-vote-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.hk-vote-check {                    /* 오른쪽 위 동그라미 선택 표시 */
+  position: absolute;
+  right: 0;
+  top: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--hk-line);
+  background: var(--hk-card);
+}
+.hk-vote-pick input:checked ~ .hk-vote-check {
+  border-color: var(--hk-accent);
+  background: var(--hk-accent);
+  box-shadow: inset 0 0 0 4px var(--hk-card);
+}
+.hk-vote-pick input:focus-visible ~ .hk-vote-check { outline: 2px solid var(--hk-accent); outline-offset: 2px; }
+.hk-vote-card:has(input:checked) { border-color: var(--hk-accent); }
+.hk-vote-card.is-leader { background: #fffaf6; }
+
+.hk-bar { height: 8px; border-radius: 99px; background: var(--hk-line); overflow: hidden; margin: 10px 0 4px; }
+.hk-bar span { display: block; height: 100%; background: var(--hk-accent); border-radius: 99px; transition: width .3s; }
+.hk-voters { font-size: .8rem; color: var(--hk-muted); margin: 0 0 6px; }
+.hk-voters strong { color: var(--hk-ink); }
+
+/* 조건 덧붙여 재추천 */
+.hk-followups { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.hk-followups li { font-size: .85rem; color: var(--hk-accent); font-weight: 500; }
+.hk-refine {
+  margin-top: 16px;
+  background: var(--hk-card);
+  border: 1px dashed var(--hk-accent);
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hk-refine .hk-quick { margin-top: 0; }
+.hk-refine-title { font-weight: 700; font-size: .9rem; margin: 0; }
+.hk-refine-limit { margin-top: 16px; font-size: .85rem; color: var(--hk-muted); }
+.hk-share-btn:disabled { opacity: .6; }

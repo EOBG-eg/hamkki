@@ -12,6 +12,11 @@
     {% if c.kind %}<span>{{ c.kind }}</span>{% endif %}
   </div>
   {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
+  {% if c.followups %}
+  <ul class="hk-followups">
+    {% for t in c.followups %}<li>➕ {{ t }}</li>{% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 {% if collected_now %}
@@ -43,9 +48,11 @@
     {% if ai.summary %}<p class="hk-ai-summary">{{ ai.summary }}</p>{% endif %}
   </section>
 
+  {% include "_map.html" %}
+
   <ol class="hk-list hk-picks">
     {% for r in ai.picks %}
-    <li class="hk-card hk-pick">
+    <li class="hk-card hk-pick" id="place-{{ r.id }}">
       <span class="hk-rank">{{ loop.index }}</span>
       <div class="hk-card-top">
         <h2>{{ r.name }}</h2>
@@ -57,12 +64,68 @@
       </div>
       {% if r.reason %}<p class="hk-reason">{{ r.reason }}</p>{% endif %}
       <p class="hk-addr">{{ r.address }}</p>
-      {% if r.url %}
-      <a href="{{ r.url }}" target="_blank" rel="noopener" class="hk-link">카카오맵에서 보기 →</a>
-      {% endif %}
+      <div class="hk-links">
+        {# 지도가 뜬 경우에만 _map.html이 이 버튼을 보이게 한다 #}
+        <button type="button" class="hk-link hk-link-btn" data-map-focus="{{ r.id }}" hidden>지도에서 보기</button>
+        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener" class="hk-link">상세 정보 →</a>{% endif %}
+        {% if r.route_url %}<a href="{{ r.route_url }}" target="_blank" rel="noopener" class="hk-link">길찾기 →</a>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ol>
+
+  {# ---------- 조건 덧붙여 다시 추천 ---------- #}
+  {% if can_follow_up %}
+  <form method="post" action="{{ url_for('recommend') }}" class="hk-refine" id="hk-refine">
+    {# 처음 조건을 그대로 다시 보낸다 #}
+    <input type="hidden" name="place_name" value="{{ place.name }}">
+    <input type="hidden" name="place_x" value="{{ place.x }}">
+    <input type="hidden" name="place_y" value="{{ place.y }}">
+    <input type="hidden" name="situation" value="{{ c.situation }}">
+    <input type="hidden" name="people" value="{{ c.people }}">
+    <input type="hidden" name="time_slot" value="{{ c.time_slot }}">
+    <input type="hidden" name="budget" value="{{ c.budget }}">
+    <input type="hidden" name="kind" value="{{ c.kind }}">
+    <input type="hidden" name="wish" value="{{ c.wish }}">
+    {% for t in c.followups %}<input type="hidden" name="followups" value="{{ t }}">{% endfor %}
+    {# 지금까지 보여준 식당 전부 (이전 회차 + 이번 추천) → 재추천 때 다시 나오지 않게 #}
+    {% for i in c.seen_ids %}{% if i not in ai.picks|map(attribute="id") %}<input type="hidden" name="seen" value="{{ i }}">{% endif %}{% endfor %}
+    {% for r in ai.picks %}<input type="hidden" name="seen" value="{{ r.id }}">{% endfor %}
+
+    <p class="hk-refine-title">🔁 마음에 안 들면 조건을 덧붙여 보세요</p>
+    <div class="hk-quick">
+      {% for t in followup_chips %}
+      <button type="button" class="hk-quick-chip" data-followup="{{ t }}">{{ t }}</button>
+      {% endfor %}
+    </div>
+    <div class="hk-share-row">
+      <input type="text" class="form-control" name="followup" id="hk-followup" maxlength="60" required
+             placeholder="예) 고기 말고 가벼운 걸로">
+      <button type="submit" class="hk-share-btn" id="hk-refine-btn">다시 추천</button>
+    </div>
+  </form>
+  <script>
+  (function () {
+    var form = document.getElementById("hk-refine");
+    var input = document.getElementById("hk-followup");
+    var btn = document.getElementById("hk-refine-btn");
+    // 빠른 선택 버튼: 누르면 바로 다시 추천
+    form.querySelectorAll("[data-followup]").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        input.value = chip.getAttribute("data-followup");
+        form.requestSubmit ? form.requestSubmit() : form.submit();
+      });
+    });
+    // AI가 다시 고르는 동안(최대 40초) 두 번 누르지 않게
+    form.addEventListener("submit", function () {
+      btn.disabled = true;
+      btn.textContent = "고르는 중…";
+    });
+  })();
+  </script>
+  {% else %}
+  <p class="hk-refine-limit">조건은 {{ c.followups|length }}번까지 덧붙일 수 있어요. 더 바꾸려면 <a href="{{ url_for('index') }}" class="hk-link">처음부터 다시 고르기</a></p>
+  {% endif %}
 
   <details class="hk-more">
     <summary>AI가 검토한 후보 {{ candidates|length }}곳 보기</summary>
@@ -80,10 +143,13 @@
     대신 상황과 음식 종류, {{ c.region }}에서 가까운 순으로 고른 후보를 보여드려요.
   </div>
 
+  {% include "_map.html" %}
+
   <p class="hk-count">후보 {{ candidates|length }}곳</p>
   <ol class="hk-list">
     {% for r in candidates %}
-    <li class="hk-card">
+    <li class="hk-card hk-pick" id="place-{{ r.id }}">
+      <span class="hk-rank">{{ loop.index }}</span>
       <div class="hk-card-top">
         <h2>{{ r.name }}</h2>
         <span class="hk-dist">{{ r.distance }}m</span>
@@ -93,12 +159,23 @@
         {% if r.detail %}<span class="hk-detail">{{ r.detail }}</span>{% endif %}
       </div>
       <p class="hk-addr">{{ r.address }}</p>
-      {% if r.url %}
-      <a href="{{ r.url }}" target="_blank" rel="noopener" class="hk-link">카카오맵에서 보기 →</a>
-      {% endif %}
+      <div class="hk-links">
+        {# 지도가 뜬 경우에만 _map.html이 이 버튼을 보이게 한다 #}
+        <button type="button" class="hk-link hk-link-btn" data-map-focus="{{ r.id }}" hidden>지도에서 보기</button>
+        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener" class="hk-link">상세 정보 →</a>{% endif %}
+        {% if r.route_url %}<a href="{{ r.route_url }}" target="_blank" rel="noopener" class="hk-link">길찾기 →</a>{% endif %}
+      </div>
     </li>
     {% endfor %}
   </ol>
+{% endif %}
+
+{% if vote_payload %}
+<form method="post" action="{{ url_for('vote_create') }}" class="hk-vote-make">
+  <input type="hidden" name="payload" value="{{ vote_payload }}">
+  <button type="submit" class="hk-submit">👥 친구들과 투표로 정하기</button>
+  <p class="hk-submit-hint">{{ "추천 3곳" if ai else "위 후보 중 앞의 3곳" }}으로 투표 링크를 만들어요. 로그인 없이 이름만 적고 투표해요.</p>
+</form>
 {% endif %}
 
 <a href="{{ url_for('index') }}" class="hk-back">← 다시 고르기</a>
