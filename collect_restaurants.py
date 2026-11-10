@@ -26,6 +26,7 @@ import os
 import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import requests
@@ -65,6 +66,7 @@ PAGE_SIZE = 15          # 카테고리 검색 한 페이지 최대 개수
 MAX_PAGES = 3           # 15 x 3 = 45개 (노출 가능한 최대치)
 MIN_CELL_SIZE = 0.0005  # 이보다 작게는 더 나누지 않음 (약 50m, 홍대처럼 식당이 빽빽한 곳 대비)
 REQUEST_DELAY = 0.15    # 요청 사이 대기 시간(초)
+COLLECT_WORKERS = 4     # 동시에 수집할 칸 수 (너무 늘리면 카카오가 막을 수 있음)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -378,10 +380,41 @@ def collect_tile(key, verbose=True):
     return added
 
 
+def _collect_many(keys, refresh=False, workers=None, on_done=None):
+    """
+    여러 칸을 동시에 수집한다. 칸마다 카카오 요청이 수십 번이라 하나씩 하면 오래 걸린다.
+    돌려주는 값: (새로 저장한 식당 수, 네트워크 오류로 못 모은 칸 목록)
+    429(쿼터 초과)는 더 시도해도 소용없으므로 그대로 올려보낸다.
+    """
+    workers = workers or COLLECT_WORKERS
+    added, failed = 0, []
+
+    def work(key):
+        if refresh:
+            _forget_tile(key)
+        return collect_tile(key, verbose=False)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(work, k): k for k in keys}
+        for fut in as_completed(futures):
+            key = futures[fut]
+            try:
+                n = fut.result()
+                added += n
+            except requests.RequestException as e:  # 이 칸만 건너뜀 (다음에 다시 시도하면 이 칸만 모음)
+                failed.append(key)
+                if on_done:
+                    on_done(key, None, e)
+                continue
+            if on_done:
+                on_done(key, n, None)
+    return added, failed
+
+
 def ensure_area(x, y, radius_m, max_new_tiles=None, refresh=False, verbose=True):
     """
     좌표 반경을 덮는 칸 중 없는 칸만 수집한다.
-    돌려주는 값: (새로 수집한 칸 수, 새로 저장한 식당 수, 한도 때문에 못 모은 칸 수)
+    돌려주는 값: (새로 수집한 칸 수, 새로 저장한 식당 수, 한도·오류 때문에 못 모은 칸 수)
     """
     keys = tiles_covering(x, y, radius_m)
     todo = keys if refresh else missing_tiles(keys, x, y, radius_m)
@@ -391,12 +424,13 @@ def ensure_area(x, y, radius_m, max_new_tiles=None, refresh=False, verbose=True)
     if max_new_tiles is not None and len(todo) > max_new_tiles:
         skipped = len(todo) - max_new_tiles
         todo = todo[:max_new_tiles]
-    added = 0
-    for key in todo:
-        if refresh:
-            _forget_tile(key)
-        added += collect_tile(key, verbose=verbose)
-    return len(todo), added, skipped
+
+    def report(key, n, err):
+        if verbose:
+            print(f"  칸 {key}: " + (f"새로 {n}곳" if err is None else f"오류로 건너뜀 ({type(err).__name__})"))
+
+    added, failed = _collect_many(todo, refresh=refresh, on_done=report)
+    return len(todo) - len(failed), added, skipped + len(failed)
 
 
 def _forget_tile(key):
@@ -513,18 +547,19 @@ def collect_area(area_name, refresh=False):
     todo = keys if refresh else missing_tiles(keys)
     print(f"\n========== [{area_name}] 전체 ==========")
     print(f"칸 {len(keys)}개 중 {len(todo)}개 수집 예정 (이미 있는 {len(keys) - len(todo)}개는 건너뜀)")
-    added, failed, started = 0, [], time.time()
-    for i, key in enumerate(todo, 1):
-        if refresh:
-            _forget_tile(key)
-        try:
-            added += collect_tile(key, verbose=False)
-        except requests.RequestException as e:  # 네트워크 오류: 이 칸만 건너뛰고 계속 (다시 실행하면 이 칸만 모음)
-            failed.append(key)
-            print(f"  [{i}/{len(todo)}] 칸 {key}: 네트워크 오류로 건너뜀 ({type(e).__name__})")
-            continue
-        count = load_tile_index()[key]["count"]
-        print(f"  [{i}/{len(todo)}] 칸 {key}: {count}곳 · 누적 새 식당 {added}곳 · {int(time.time() - started)}초")
+    started, progress = time.time(), {"done": 0, "added": 0}
+
+    def report(key, n, err):
+        progress["done"] += 1
+        head = f"  [{progress['done']}/{len(todo)}] 칸 {key}: "
+        if err is not None:
+            print(head + f"네트워크 오류로 건너뜀 ({type(err).__name__})", flush=True)
+            return
+        progress["added"] += n
+        count = load_tile_index().get(key, {}).get("count", 0)
+        print(head + f"{count}곳 · 누적 새 식당 {progress['added']}곳 · {int(time.time() - started)}초", flush=True)
+
+    added, failed = _collect_many(todo, refresh=refresh, on_done=report)
     if failed:
         print(f"⚠ 칸 {len(failed)}개는 네트워크 오류로 못 모았어요. 같은 명령을 한 번 더 실행하면 그 칸만 모아요.")
     total = sum(load_tile_index().get(k, {}).get("count", 0) for k in keys)

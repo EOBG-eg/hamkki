@@ -6,7 +6,13 @@ services:
     runtime: python
     plan: free
     # 저장소 맨 위(hamkki)에서 실행한다. app.py가 위 폴더의 collect_restaurants.py를 쓰기 때문.
-    buildCommand: pip install -r hamkki_app/requirements.txt
+    # 빌드 때 식당을 미리 수집한다. 빌드에서 만든 파일은 서버 이미지에 포함되어 서버가 잠들었다 깨어나도 남는다.
+    # (실행 중에 새로 만든 파일 = 투표, 검색 때 자동 수집한 칸은 재시작 때 사라짐)
+    # data/는 GitHub에 올리지 않는다(카카오 데이터 재배포 방지). 수집이 실패해도 배포는 계속하고 검색 때 자동 수집에 맡긴다.
+    # 미리 모을 지역을 늘리려면 뒤에 역 이름을 붙인다. 예: ... --area 의정부시 의정부역 홍대입구역 강남역
+    buildCommand: >-
+      pip install -r hamkki_app/requirements.txt &&
+      (python collect_restaurants.py --area 의정부시 의정부역 || echo "[빌드] 식당 미리 수집 실패 - 검색 때 자동 수집으로 대신합니다")
     # 워커 1개 + 스레드 4개: 투표 파일 잠금과 하루 수집 한도가 한 프로세스 안에서만 지켜지므로 워커는 1개로 둔다.
     # timeout 120초: 새 지역 자동 수집 + AI 추천(최대 40초)까지 기다릴 수 있게.
     startCommand: gunicorn --chdir hamkki_app app:app --workers 1 --threads 4 --timeout 120
