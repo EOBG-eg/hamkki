@@ -25,8 +25,29 @@
 {% if collect_note %}
   <div class="hk-notice">{{ collect_note }}</div>
 {% endif %}
+{% if moved_note %}
+  <div class="hk-notice hk-moved">{{ icon("pin") }} {{ moved_note }}</div>
+{% endif %}
 
-{% if place_not_found %}
+{% if broad_hubs %}
+  {# '제주도'·'부산'처럼 너무 넓은 지역: 대표 번화가를 고르면 처음 조건 그대로 다시 추천 #}
+  <section class="hk-broad">
+    <p class="hk-broad-title">‘{{ c.region }}’ 전체는 너무 넓어요.<br>어디 근처에서 찾을까요?</p>
+    <form method="post" action="{{ url_for('recommend') }}"
+          data-loading="근처 식당을 찾고 있어요|상황에 맞는 후보를 추리고 있어요|함끼가 3곳을 고르는 중이에요|거의 다 됐어요">
+      {% for k in ["situation", "people", "time_slot", "budget", "kind", "wish"] %}
+      <input type="hidden" name="{{ k }}" value="{{ form.get(k, '') }}">
+      {% endfor %}
+      <div class="hk-broad-hubs">
+        {% for h in broad_hubs %}
+        <button type="submit" name="place_query" value="{{ h }}">{{ icon("pin") }}{{ h }}</button>
+        {% endfor %}
+      </div>
+    </form>
+    <a href="{{ url_for('index') }}" class="hk-link">직접 다시 검색하기</a>
+  </section>
+
+{% elif place_not_found %}
   <div class="hk-empty">
     <p>‘{{ c.region }}’ 위치를 찾지 못했어요.<br>역 이름이나 동네 이름으로 다시 검색해 주세요.</p>
     <a href="{{ url_for('index') }}" class="hk-link">다시 검색하기</a>
@@ -192,7 +213,7 @@
   </ol>
 {% endif %}
 
-{% if vote_payload %}
+{% if vote_payload and c.situation != "혼밥" %}{# 혼밥은 혼자 먹으니 투표 버튼을 숨긴다 #}
 <form method="post" action="{{ url_for('vote_create') }}" class="hk-vote-make">
   <input type="hidden" name="payload" value="{{ vote_payload }}">
   <button type="submit" class="hk-submit">{{ icon("users") }} 친구들과 투표로 정하기</button>

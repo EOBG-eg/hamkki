@@ -73,11 +73,12 @@
   <div class="hk-row">
     <div class="hk-field">
       <label class="hk-label" for="people">인원</label>
-      <div class="hk-stepper">
+      <div class="hk-stepper" id="hk-stepper">
         <button type="button" onclick="step(-1)" aria-label="한 명 줄이기">−</button>
         <input type="number" id="people" name="people" value="2" min="1" max="30">
         <button type="button" onclick="step(1)" aria-label="한 명 늘리기">+</button>
       </div>
+      <p class="hk-solo-note" id="hk-solo-note" hidden>혼밥은 1명이에요</p>
     </div>
     <div class="hk-field">
       <label class="hk-label" for="time_slot">시간대 <small class="hk-optional">선택</small></label>
@@ -118,8 +119,34 @@
 <script>
   function step(n) {
     const el = document.getElementById("people");
+    if (el.readOnly) return;   // 혼밥이면 1명으로 고정
     el.value = Math.max(1, Math.min(30, (parseInt(el.value) || 1) + n));
   }
+
+  // ---------- 혼밥이면 인원 1명으로 고정 ----------
+  // 다른 자리로 바꾸면 혼밥을 고르기 전 인원으로 되돌린다
+  (function () {
+    const people = document.getElementById("people");
+    const stepper = document.getElementById("hk-stepper");
+    const note = document.getElementById("hk-solo-note");
+    let before = people.value;
+    function apply() {
+      const solo = document.querySelector('input[name="situation"]:checked')?.value === "혼밥";
+      if (solo && !people.readOnly) {
+        before = people.value;
+        people.value = 1;
+      } else if (!solo && people.readOnly) {
+        people.value = before;
+      }
+      people.readOnly = solo;
+      stepper.classList.toggle("is-locked", solo);
+      stepper.querySelectorAll("button").forEach((b) => (b.disabled = solo));
+      note.hidden = !solo;
+    }
+    document.querySelectorAll('input[name="situation"]').forEach((r) => r.addEventListener("change", apply));
+    window.addEventListener("pageshow", apply);   // 뒤로 가기로 돌아왔을 때도 상태를 맞춘다
+    apply();
+  })();
 
   // ---------- 장소 검색 자동완성 ----------
   const input = document.getElementById("place_query");

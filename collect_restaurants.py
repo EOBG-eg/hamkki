@@ -337,6 +337,19 @@ def find_center(region_name):
     return found[0] if found else None
 
 
+def nearest_restaurant(x, y, radius_m=20000):
+    """좌표에서 가장 가까운 음식점 하나 (산·바다처럼 근처에 식당이 없을 때 식당가를 찾는 용도).
+    카카오 카테고리 검색은 반경 최대 20km. 없으면 None."""
+    data = kakao_get(CATEGORY_URL, {
+        "category_group_code": CATEGORY_CODE,
+        "x": x, "y": y, "radius": radius_m,
+        "sort": "distance",
+        "size": 1,
+    }, retries=1)   # 화면에서 기다리므로 재시도 1번만
+    docs = data.get("documents", [])
+    return docs[0] if docs else None
+
+
 def search_rect(min_x, min_y, max_x, max_y, page):
     """사각형 범위 안의 음식점을 한 페이지 검색한다."""
     return kakao_get(CATEGORY_URL, {

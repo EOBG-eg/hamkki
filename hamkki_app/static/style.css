@@ -772,3 +772,37 @@ body {
   margin-left: 4px;
   vertical-align: 1px;
 }
+
+/* 혼밥: 인원 1명 고정 */
+.hk-stepper.is-locked { background: #f6f1eb; }
+.hk-stepper.is-locked button { color: #cfc4ba; }
+.hk-stepper.is-locked input { color: var(--hk-muted); background: transparent; }
+.hk-solo-note { font-size: .75rem; color: var(--hk-accent); margin: 6px 2px 0; }
+
+/* 너무 넓은 지역 → 대표 번화가 고르기 */
+.hk-broad {
+  background: var(--hk-card);
+  border: 1px solid var(--hk-line);
+  border-radius: 18px;
+  padding: 18px 16px;
+  margin: 8px 0 16px;
+  text-align: center;
+}
+.hk-broad-title { font-family: "Gowun Dodum", sans-serif; font-size: 1.15rem; line-height: 1.5; margin: 0 0 14px; }
+.hk-broad-hubs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 14px; }
+.hk-broad-hubs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1.5px solid #f2c9b8;
+  background: #fffaf6;
+  color: var(--hk-ink);
+  border-radius: 999px;
+  padding: 7px 14px 7px 10px;
+  font-size: .9rem;
+  font-weight: 500;
+}
+.hk-broad-hubs button:active { background: var(--hk-accent); color: #fff; border-color: var(--hk-accent); }
+.hk-broad-hubs .hk-ic { color: var(--hk-accent); width: 15px; height: 15px; }
+.hk-moved { display: flex; gap: 6px; align-items: flex-start; }
+.hk-moved .hk-ic { flex: none; margin-top: 1px; }

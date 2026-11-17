@@ -128,6 +128,46 @@ SITUATIONS = {
     },
 }
 
+# 너무 넓은 지역 이름 (시·도). 이 이름으로 찾으면 기준점이 산·관광지 한 점으로 잡혀 식당이 0곳이 된다
+# ('제주도' → 한라산 근처). 그래서 대표 번화가를 골라 달라고 한다. 키 = 화면에 보일 이름
+BROAD_AREAS = {
+    "서울": ["강남역", "홍대입구역", "명동역", "건대입구역", "성수역", "잠실역"],
+    "부산": ["서면역", "해운대역", "남포역", "부산역", "광안역"],
+    "대구": ["대구 중앙로역", "동대구역", "수성못", "반월당역"],   # '동성로'만 쓰면 부산 동성로로 감
+    "인천": ["부평역", "인천터미널역", "송도 센트럴파크", "인천 차이나타운"],
+    "광주": ["충장로4가", "광주송정역", "상무지구"],
+    # 카카오 주소에 광주+전남이 '전남광주통합특별시'로 나온다 (2026-11 확인)
+    "전남광주": ["충장로4가", "광주송정역", "상무지구", "여수 이순신광장", "목포역", "순천역"],
+    "대전": ["둔산동", "대전역", "대전 은행동", "유성온천역"],   # 동 이름은 같은 이름이 여러 도시에 있어 도시를 붙임
+    "울산": ["울산 삼산동", "울산 성남동", "울산대공원"],
+    "세종": ["나성동", "세종시청", "조치원역"],
+    "경기": ["수원역", "판교역", "의정부역", "부천역", "일산 라페스타"],
+    "강원": ["강릉역", "춘천역", "속초관광수산시장", "원주역"],
+    "충북": ["청주 성안길", "충주역", "오송역"],
+    "충남": ["천안역", "온양온천역", "공주 공산성"],
+    "전북": ["전주 한옥마을", "전북대학교", "군산 은파호수공원"],
+    "전남": ["여수 이순신광장", "목포역", "순천역"],
+    "경북": ["경주 황리단길", "포항 영일대", "안동역"],
+    "경남": ["상남시장", "진주 평거동", "통영 중앙시장", "김해시청"],
+    "제주": ["제주시청", "제주공항", "서귀포 매일올레시장", "애월읍", "성산일출봉", "중문관광단지"],
+}
+_BROAD_ALIASES = {
+    "서울": ["서울시", "서울특별시"], "부산": ["부산시", "부산광역시"], "대구": ["대구시", "대구광역시"],
+    "인천": ["인천시", "인천광역시"], "광주": ["광주시", "광주광역시"], "대전": ["대전시", "대전광역시"],
+    "울산": ["울산시", "울산광역시"], "세종": ["세종시", "세종특별자치시"], "경기": ["경기도"],
+    "강원": ["강원도", "강원특별자치도"], "충북": ["충청북도"], "충남": ["충청남도"],
+    "전북": ["전라북도", "전북특별자치도"], "전남": ["전라남도"], "경북": ["경상북도"], "경남": ["경상남도"],
+    "제주": ["제주도", "제주특별자치도"],
+    "전남광주": ["전남광주통합특별시", "광주전남"],
+}
+BROAD_LOOKUP = {a: k for k, names in _BROAD_ALIASES.items() for a in [k, *names]}
+
+
+def broad_area(query):
+    """'제주도', '부산광역시'처럼 시·도 이름 그대로면 그 지역 키. 아니면 None. ('제주시청'·'부산역'은 해당 없음)"""
+    return BROAD_LOOKUP.get("".join((query or "").split()))
+
+
 TIME_SLOTS = ["점심", "저녁", "늦은 밤"]
 # 음식 종류 선택지 (카카오 분류 두 번째 단계)
 KINDS = ["한식", "중식", "일식", "양식", "아시아음식", "분식", "치킨", "술집", "패스트푸드",
@@ -325,6 +365,49 @@ def resolve_place(form):
     return None
 
 
+def gather_nearby(place):
+    """검색한 장소 주변 칸 중 아직 없는 칸만 그 자리에서 모으고(다음 사람부터는 바로 사용), 반경 안 식당을 돌려준다.
+    돌려주는 값: (반경 식당 목록, 새로 모은 식당 수, 안내 문구 또는 None)"""
+    collected_now = 0
+    collect_note = None
+    keys = collector.tiles_covering(place["x"], place["y"], SEARCH_RADIUS_M)
+    if collector.missing_tiles(keys, place["x"], place["y"], SEARCH_RADIUS_M):
+        allowed = min(AUTO_TILES_PER_SEARCH, tiles_left_today())
+        if allowed == 0:
+            collect_note = "오늘은 새 지역 수집 한도를 다 썼어요. 이미 모아둔 식당 안에서 찾았어요."
+        else:
+            try:
+                new_tiles, collected_now, skipped = collector.ensure_area(
+                    place["x"], place["y"], SEARCH_RADIUS_M, max_new_tiles=allowed, verbose=False)
+                _auto_collect_log.extend([time.time()] * new_tiles)
+                if skipped:
+                    collect_note = "주변 일부는 아직 못 모았어요. 잠시 후 다시 검색하면 더 넓게 찾아드려요."
+            except Exception as e:
+                print(f"[자동 수집 오류] {e}")
+                collect_note = "이 지역 식당 정보를 새로 모으지 못했어요. 이미 모아둔 식당 안에서 찾았어요."
+    nearby = collector.places_near(place["x"], place["y"], SEARCH_RADIUS_M)
+    return nearby, collected_now, collect_note
+
+
+def nearest_food_area(place):
+    """기준점 근처에 식당이 없을 때: 가장 가까운 음식점이 있는 동네로 기준점을 옮긴다. 못 찾으면 None."""
+    try:
+        r = collector.nearest_restaurant(place["x"], place["y"])
+    except Exception as e:
+        print(f"[식당가 찾기 오류] {e}")
+        return None
+    if not r:
+        return None
+    x, y = float(r["x"]), float(r["y"])
+    try:
+        dong = collector.region_name_at(x, y)
+    except Exception:
+        dong = ""
+    away = collector.distance_m(place["x"], place["y"], x, y) / 1000
+    return {"name": dong or r.get("place_name", "식당가"), "x": x, "y": y,
+            "gps": place.get("gps", False), "away_km": round(away, 1)}
+
+
 @app.route("/recommend", methods=["POST"])
 def recommend():
     situation = request.form.get("situation", "친구")
@@ -335,6 +418,18 @@ def recommend():
         people = max(1, min(30, int(request.form.get("people", 2))))
     except ValueError:
         people = 2
+    if situation == "혼밥":   # 화면에서 1명으로 고정하지만, 서버에서도 한 번 더 맞춘다
+        people = 1
+
+    # '제주도'·'부산'처럼 시·도 이름이면 너무 넓어서 대표 번화가를 고르게 한다
+    if request.form.get("place_source") != "gps":
+        area = broad_area(request.form.get("place_query") or request.form.get("place_name"))
+        if area:
+            return render_template("results.html", c={"region": request.form.get("place_query") or area,
+                                   "situation": situation, "emoji": SITUATIONS[situation]["emoji"], "icon": SITUATIONS[situation]["icon"],
+                                   "people": people, "time_slot": "", "budget": "", "kind": "", "wish": ""},
+                                   candidates=[], ai=None, ai_error=None, has_data=True,
+                                   broad_hubs=BROAD_AREAS[area], form=request.form)
 
     place = resolve_place(request.form)
     if not place:
@@ -359,27 +454,23 @@ def recommend():
         "followups": read_followups(request.form),
     }
 
-    # 검색한 장소 주변 칸 중 아직 없는 칸만 그 자리에서 모은다 (다음 사람부터는 바로 사용)
-    collected_now = 0
-    collect_note = None
-    keys = collector.tiles_covering(place["x"], place["y"], SEARCH_RADIUS_M)
-    if collector.missing_tiles(keys, place["x"], place["y"], SEARCH_RADIUS_M):
-        allowed = min(AUTO_TILES_PER_SEARCH, tiles_left_today())
-        if allowed == 0:
-            collect_note = "오늘은 새 지역 수집 한도를 다 썼어요. 이미 모아둔 식당 안에서 찾았어요."
-        else:
-            try:
-                new_tiles, collected_now, skipped = collector.ensure_area(
-                    place["x"], place["y"], SEARCH_RADIUS_M, max_new_tiles=allowed, verbose=False)
-                _auto_collect_log.extend([time.time()] * new_tiles)
-                if skipped:
-                    collect_note = "주변 일부는 아직 못 모았어요. 잠시 후 다시 검색하면 더 넓게 찾아드려요."
-            except Exception as e:
-                print(f"[자동 수집 오류] {e}")
-                collect_note = "이 지역 식당 정보를 새로 모으지 못했어요. 이미 모아둔 식당 안에서 찾았어요."
+    nearby, collected_now, collect_note = gather_nearby(place)
+
+    # 산·바다·외곽처럼 1km 안에 식당이 없으면, 가장 가까운 식당가로 기준점을 옮겨서 다시 찾는다
+    moved_note = None
+    if not nearby:
+        moved = nearest_food_area(place)
+        if moved:
+            moved_note = (f"‘{place['name']}’ 1km 안에는 식당이 없어서, 약 {moved['away_km']}km 떨어진 "
+                          f"가장 가까운 식당가 {moved['name']} 근처에서 찾았어요.")
+            place = moved
+            conditions["region"] = place["name"]
+            nearby, more, note = gather_nearby(place)
+            collected_now += more
+            collect_note = note or collect_note
+
     if not place.get("gps"):  # 현재 위치는 '바로 찾기' 목록에 남기지 않는다 (개인 위치라서)
         collector.remember_place(place["name"], place["x"], place["y"])
-    nearby = collector.places_near(place["x"], place["y"], SEARCH_RADIUS_M)
 
     candidates = find_candidates(nearby, situation, conditions["kind"])
 
@@ -435,6 +526,7 @@ def recommend():
         has_data=True,
         collected_now=collected_now,
         collect_note=collect_note,
+        moved_note=moved_note,
         map_data=map_data,
         kakao_js_key=os.getenv("KAKAO_JS_KEY", ""),
         vote_payload=vote_payload,
