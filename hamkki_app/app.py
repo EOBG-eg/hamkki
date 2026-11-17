@@ -48,6 +48,7 @@ sys.path.insert(0, PROJECT_DIR)
 import collect_restaurants as collector  # noqa: E402
 import db  # noqa: E402
 import vote_store  # noqa: E402  (db.py를 쓰므로 경로 추가 뒤에)
+import feedback_store  # noqa: E402
 
 if db.enabled():  # 배포 서버: 시작할 때 DB 연결을 한 번 확인해서 로그에 남긴다
     print("[DB]", db.check()[1], flush=True)
@@ -396,10 +397,20 @@ def recommend():
     map_data = {"center": {"name": place["name"], "x": place["x"], "y": place["y"]},
                 "points": map_points(shown)} if shown else None
 
+    # 만족도 기록: AI 추천을 보여줄 때마다 한 줄 (기록이 실패해도 추천 화면은 그대로 보여준다)
+    rec_id = None
+    if ai_result:
+        try:
+            rec_id = feedback_store.record_shown(situation, len(conditions["followups"]),
+                                                 bool(conditions["wish"]), bool(place.get("gps")))
+        except (db.DBError, OSError) as e:
+            print(f"[만족도 기록 오류] {e}")
+
     # 투표 만들기용 내용 (서명해서 화면에 숨겨 둔다). AI가 실패하면 후보 앞 3곳으로 투표한다.
     vote_payload = None
     if shown:
         vote_payload = _signer.dumps({
+            "rec": rec_id,
             "c": conditions,
             "summary": ai_result["summary"] if ai_result else "",
             "center": map_data["center"],
@@ -418,6 +429,8 @@ def recommend():
         map_data=map_data,
         kakao_js_key=os.getenv("KAKAO_JS_KEY", ""),
         vote_payload=vote_payload,
+        rec_id=rec_id,
+        feedback_reasons=feedback_store.REASONS,
         place=place,
         followup_chips=FOLLOWUP_CHIPS,
         can_follow_up=len(conditions["followups"]) < MAX_FOLLOWUPS,
@@ -451,6 +464,11 @@ def vote_create():
                                error="추천 결과가 만료됐어요. 다시 추천을 받은 뒤 투표를 만들어 주세요."), 400
     voter = _voter_token()
     vote_id = vote_store.create_vote(data["c"], data["summary"], data["center"], data["options"], owner=voter)
+    if data.get("rec"):  # 통계: 이 추천이 투표로 이어졌다
+        try:
+            feedback_store.link_vote(data["rec"], vote_id)
+        except (db.DBError, OSError) as e:
+            print(f"[만족도 기록 오류] {e}")
     resp = redirect(url_for("vote_page", vote_id=vote_id, new=1))
     _set_voter_cookie(resp, voter)  # 만든 사람 브라우저를 기억 → 이 브라우저에서만 '최종 결정' 버튼이 보임
     return resp
@@ -516,6 +534,27 @@ def vote_page(vote_id):
     ))
     _set_voter_cookie(resp, voter)
     return resp
+
+
+# ---------------------------------------------------------------
+# 추천 만족도 (👍👎) / 관리용 통계
+# ---------------------------------------------------------------
+@app.route("/api/feedback", methods=["POST"])
+def api_feedback():
+    body = request.get_json(silent=True) or {}
+    reasons = body.get("reasons") if isinstance(body.get("reasons"), list) else []
+    ok = feedback_store.rate(str(body.get("rec", ""))[:20], body.get("rating"), [str(r)[:30] for r in reasons[:10]])
+    return jsonify({"ok": ok}), (200 if ok else 400)
+
+
+@app.route("/admin/stats")
+def admin_stats():
+    """보고서·발표용 통계. Render 환경변수 ADMIN_KEY와 주소의 ?key= 가 같을 때만 보인다."""
+    key = os.getenv("ADMIN_KEY", "")
+    if not key or not secrets.compare_digest(request.args.get("key", ""), key):
+        return render_template("vote.html", vote=None, error="페이지를 찾을 수 없어요."), 404
+    return render_template("stats.html", s=feedback_store.stats(),
+                           storage="Postgres" if db.enabled() else "파일(data/)")
 
 
 @app.errorhandler(db.DBError)

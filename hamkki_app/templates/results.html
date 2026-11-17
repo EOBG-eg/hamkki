@@ -74,6 +74,24 @@
     {% endfor %}
   </ol>
 
+  {# ---------- 만족도 (보고서 통계용) ---------- #}
+  {% if rec_id %}
+  <section class="hk-feedback" id="hk-feedback" data-rec="{{ rec_id }}">
+    <p class="hk-feedback-q">이 추천 어땠나요?</p>
+    <div class="hk-feedback-btns">
+      <button type="button" data-rate="up">👍 괜찮아요</button>
+      <button type="button" data-rate="down">👎 아쉬워요</button>
+    </div>
+    <div class="hk-feedback-why" hidden>
+      <p>어떤 점이 아쉬웠나요? (여러 개 골라도 돼요)</p>
+      <div class="hk-feedback-reasons">
+        {% for r in feedback_reasons %}<button type="button" data-reason="{{ r }}">{{ r }}</button>{% endfor %}
+      </div>
+    </div>
+    <p class="hk-feedback-thanks" role="status"></p>
+  </section>
+  {% endif %}
+
   {# ---------- 조건 덧붙여 다시 추천 ---------- #}
   {% if can_follow_up %}
   <form method="post" action="{{ url_for('recommend') }}" class="hk-refine" id="hk-refine">
@@ -180,4 +198,40 @@
 {% endif %}
 
 <a href="{{ url_for('index') }}" class="hk-back">← 다시 고르기</a>
+
+{% if rec_id %}
+<script>
+(function () {
+  // 👍👎을 누르면 바로 저장. 👎이면 이유를 고를 때마다 다시 저장(마지막 상태가 남는다).
+  var box = document.getElementById("hk-feedback");
+  var why = box.querySelector(".hk-feedback-why");
+  var thanks = box.querySelector(".hk-feedback-thanks");
+  var rating = null;
+  function send() {
+    var reasons = Array.prototype.map.call(box.querySelectorAll("[data-reason].is-on"), function (b) { return b.dataset.reason; });
+    fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rec: box.dataset.rec, rating: rating, reasons: reasons })
+    }).then(function (res) {
+      thanks.textContent = res.ok
+        ? (rating === "up" ? "고마워요! 맛있게 드세요 🍚"
+                           : "알려 줘서 고마워요. 아래에서 조건을 덧붙여 다시 추천받을 수 있어요.")
+        : "저장하지 못했어요. 잠시 후 다시 눌러 주세요.";
+    }).catch(function () { thanks.textContent = "저장하지 못했어요. 잠시 후 다시 눌러 주세요."; });
+  }
+  box.querySelectorAll("[data-rate]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      rating = btn.dataset.rate;
+      box.querySelectorAll("[data-rate]").forEach(function (b) { b.classList.toggle("is-on", b === btn); });
+      why.hidden = rating !== "down";
+      send();
+    });
+  });
+  box.querySelectorAll("[data-reason]").forEach(function (btn) {
+    btn.addEventListener("click", function () { btn.classList.toggle("is-on"); send(); });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

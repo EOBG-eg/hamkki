@@ -173,6 +173,20 @@ def _update(vote_id, change):
     return ok, err
 
 
+def all_votes():
+    """통계용: 모든 투표"""
+    if db.enabled():
+        return db.all_votes()
+    if not os.path.isdir(VOTE_DIR):
+        return []
+    votes = []
+    for name in sorted(os.listdir(VOTE_DIR)):
+        if name.endswith(".json"):
+            with open(os.path.join(VOTE_DIR, name), encoding="utf-8") as f:
+                votes.append(json.load(f))
+    return votes
+
+
 def tally(vote):
     """식당별 득표 수와 투표한 사람 이름. 1등(동점 포함) ID 목록도 함께."""
     counts = {o["id"]: [] for o in vote["options"]}

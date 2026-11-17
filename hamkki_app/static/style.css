@@ -422,3 +422,40 @@ body {
 }
 .hk-locate-btn:disabled { opacity: .6; }
 .hk-locate-msg { font-size: .8rem; color: var(--hk-muted); }
+
+/* 추천 만족도 */
+.hk-feedback {
+  background: var(--hk-card);
+  border: 1px solid var(--hk-line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin: 4px 0 16px;
+}
+.hk-feedback-q { font-weight: 700; font-size: .9rem; margin: 0 0 8px; }
+.hk-feedback-btns { display: flex; gap: 8px; }
+.hk-feedback-btns button, .hk-feedback-reasons button {
+  border: 1px solid var(--hk-line);
+  border-radius: 999px;
+  background: var(--hk-bg);
+  color: var(--hk-ink);
+  font-size: .85rem;
+  padding: 6px 14px;
+}
+.hk-feedback-btns button { flex: 1; font-weight: 700; }
+.hk-feedback button.is-on { border-color: var(--hk-accent); background: var(--hk-accent-soft); color: var(--hk-accent); }
+.hk-feedback-why p { font-size: .8rem; color: var(--hk-muted); margin: 10px 0 6px; }
+.hk-feedback-reasons { display: flex; flex-wrap: wrap; gap: 6px; }
+.hk-feedback-thanks { font-size: .8rem; color: var(--hk-accent); margin: 8px 0 0; }
+.hk-feedback-thanks:empty { display: none; }
+
+/* 관리용 통계 */
+.hk-stats-note { font-size: .8rem; color: var(--hk-muted); margin: 0; }
+.hk-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 18px; }
+.hk-stats-grid div { background: var(--hk-card); border: 1px solid var(--hk-line); border-radius: 14px; padding: 12px; }
+.hk-stats-grid strong { display: block; font-size: 1.5rem; color: var(--hk-accent); }
+.hk-stats-grid span { font-size: .78rem; color: var(--hk-muted); }
+.hk-stats-h { font-size: .95rem; font-weight: 700; margin: 18px 0 8px; }
+.hk-stats-table { width: 100%; font-size: .85rem; background: var(--hk-card); border-radius: 12px; overflow: hidden; }
+.hk-stats-table th, .hk-stats-table td { padding: 7px 10px; border-bottom: 1px solid var(--hk-line); }
+.hk-stats-table th { color: var(--hk-muted); font-weight: 500; }
+.hk-stats-table td:not(:first-child), .hk-stats-table th:not(:first-child) { text-align: right; }

@@ -6,6 +6,7 @@ Render는 서버가 잠들거나 재시작하면 실행 중에 만든 파일이 
   - votes        : 동행자 투표
   - tiles        : 검색할 때 그 자리에서 모은 칸 (빌드 때 미리 모은 의정부시는 이미지 안 파일에 있음)
   - named_places : 검색된 장소 이름 ('바로 찾기' 버튼)
+  - feedback     : AI 추천 1건마다 한 줄 (만족도 👍👎, 투표로 이어졌는지) → 보고서 통계용
 
 드라이버는 pg8000(파이썬으로만 된 드라이버)을 쓴다.
 psycopg는 DLL을 쓰는데 학교 PC 보안 정책이 그 DLL을 막아서 바꿨다.
@@ -35,6 +36,10 @@ SCHEMA = [
     """CREATE TABLE IF NOT EXISTS named_places (
            name TEXT PRIMARY KEY,
            info JSONB NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS feedback (
+           rec_id TEXT PRIMARY KEY,
+           data JSONB NOT NULL,
+           created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
 ]
 
 
@@ -180,6 +185,37 @@ def remember_place(name, info):
                 "'searches', COALESCE((named_places.info->>'searches')::int, 0) + 1, "
                 "'last', CAST(:last AS text))",
                 n=name, i=_j(info), last=info["last"])
+
+
+# ---------------------------------------------------------------
+# 추천 만족도 / 통계
+# ---------------------------------------------------------------
+def insert_feedback(rec_id, data):
+    with connect() as con:
+        con.run("INSERT INTO feedback (rec_id, data) VALUES (:r, CAST(:d AS jsonb)) ON CONFLICT (rec_id) DO NOTHING",
+                r=rec_id, d=_j(data))
+
+
+def update_feedback(rec_id, change):
+    """잠그고 읽어서 change(data)로 고친 뒤 저장. change가 False를 돌려주면 저장하지 않는다."""
+    with connect() as con:
+        con.run("START TRANSACTION")
+        rows = con.run("SELECT data FROM feedback WHERE rec_id = :r FOR UPDATE", r=rec_id)
+        ok = change(rows[0][0] if rows else None)
+        if ok:
+            con.run("UPDATE feedback SET data = CAST(:d AS jsonb) WHERE rec_id = :r", r=rec_id, d=_j(rows[0][0]))
+        con.run("COMMIT")
+    return ok
+
+
+def all_feedback():
+    with connect() as con:
+        return [d for (d,) in con.run("SELECT data FROM feedback ORDER BY created_at")]
+
+
+def all_votes():
+    with connect() as con:
+        return [d for (d,) in con.run("SELECT data FROM votes ORDER BY created_at")]
 
 
 def check():

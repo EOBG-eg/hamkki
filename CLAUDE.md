@@ -37,6 +37,7 @@ hamkki/                       ← 이 폴더에서 Claude Code를 연다
 └── hamkki_app/
     ├── app.py                ← Flask 서버 (실행 파일)
     ├── ai_recommend.py       ← Gemini 추천
+    ├── feedback_store.py     ← 추천 만족도 기록·통계
     ├── vote_store.py         ← 투표 저장 (DATABASE_URL 있으면 Postgres, 없으면 data/votes 파일)
     ├── requirements.txt      ← flask, requests, python-dotenv, google-genai, truststore, gunicorn, pg8000
     ├── templates/            ← base.html, index.html(입력), results.html(결과), vote.html(투표), _map.html(지도)
@@ -73,6 +74,8 @@ python app.py                → http://localhost:5000
 10. 카톡 공유 미리보기: base.html Open Graph 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
 11. 현재 위치로 찾기: 브라우저 GPS → `/api/where`(카카오 coord2regioncode, 법정동 이름) → '현재 위치 · ○○동'. `place_source=gps`면 좌표를 소수 셋째 자리(약 100m)로 흐리고 '바로 찾기'(places.json)에 기록 안 함. https/localhost에서만 동작
 12. 시간대: 첫 화면 JS가 휴대폰 시각으로 미리 선택 (5~15시 점심, 15~22시 저녁, 그 외 늦은 밤). 서버(Render)는 UTC라 서버에서 정하면 틀림
+13. 추천 만족도(`feedback_store.py`): AI 추천마다 rec_id 한 줄(상황·재추천 횟수·분위기 문장 유무·GPS 여부만, 장소·문장 저장 안 함) → 결과 화면 👍👎(+👎 이유 5개 중 선택) → 투표 만들면 vote ID 연결. DB `feedback` 표 / 파일 `data/feedback.json`
+14. 관리용 통계 `/admin/stats?key=ADMIN_KEY` (환경변수 ADMIN_KEY 없으면 404): 👍 비율, 재추천 단계별·상황별, 👎 이유, 투표로 이어진 비율, 투표 참여·결정 비율 → 보고서·발표 근거
 
 수집 세부:
 - 칸은 동시에 4개씩 수집 (`COLLECT_WORKERS`, 의정부역 1km 빈 상태 기준 50초 → 19초)
