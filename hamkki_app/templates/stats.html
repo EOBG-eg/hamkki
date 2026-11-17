@@ -3,7 +3,7 @@
 {% block content %}
 {# 관리용 통계 (보고서·발표 근거). ADMIN_KEY를 아는 사람만 열 수 있다. #}
 <section class="hk-ai">
-  <p class="hk-ai-label">📊 함끼 사용 통계</p>
+  <p class="hk-ai-label">{{ icon("chart") }} 함끼 사용 통계</p>
   <p class="hk-stats-note">
     {% if s.since %}{{ s.since }} ~ {{ s.until }} · {% endif %}저장소: {{ storage }}<br>
     장소·좌표·분위기 문장은 저장하지 않고, 상황과 재추천 횟수만 기록해요.
@@ -13,13 +13,13 @@
 <div class="hk-stats-grid">
   <div><strong>{{ s.shown }}</strong><span>AI 추천</span></div>
   <div><strong>{{ s.rated }}</strong><span>평가 참여{% if s.rated_pct is not none %} ({{ s.rated_pct }}%){% endif %}</span></div>
-  <div><strong>{{ s.up_pct if s.up_pct is not none else "-" }}%</strong><span>👍 비율 ({{ s.up }}/{{ s.rated }})</span></div>
+  <div><strong>{{ s.up_pct if s.up_pct is not none else "-" }}%</strong><span>좋아요 비율 ({{ s.up }}/{{ s.rated }})</span></div>
   <div><strong>{{ s.to_vote_pct if s.to_vote_pct is not none else "-" }}%</strong><span>투표로 이어짐 ({{ s.to_vote }}건)</span></div>
 </div>
 
 <h2 class="hk-stats-h">재추천 단계별</h2>
 <table class="hk-stats-table">
-  <tr><th></th><th>추천</th><th>평가</th><th>👍 비율</th></tr>
+  <tr><th></th><th>추천</th><th>평가</th><th>좋아요 비율</th></tr>
   {% for r in s.by_round %}
   <tr><td>{{ r.label }}</td><td>{{ r.shown }}</td><td>{{ r.rated }}</td><td>{{ r.up_pct ~ "%" if r.up_pct is not none else "-" }}</td></tr>
   {% endfor %}
@@ -27,7 +27,7 @@
 
 <h2 class="hk-stats-h">상황별</h2>
 <table class="hk-stats-table">
-  <tr><th></th><th>추천</th><th>평가</th><th>👍 비율</th></tr>
+  <tr><th></th><th>추천</th><th>평가</th><th>좋아요 비율</th></tr>
   {% for r in s.by_situation %}
   <tr><td>{{ r.label }}</td><td>{{ r.shown }}</td><td>{{ r.rated }}</td><td>{{ r.up_pct ~ "%" if r.up_pct is not none else "-" }}</td></tr>
   {% else %}
@@ -35,7 +35,7 @@
   {% endfor %}
 </table>
 
-<h2 class="hk-stats-h">👎 이유</h2>
+<h2 class="hk-stats-h">아쉬워요 이유</h2>
 <table class="hk-stats-table">
   {% for name, n in s.reasons %}<tr><td>{{ name }}</td><td>{{ n }}</td></tr>{% endfor %}
 </table>

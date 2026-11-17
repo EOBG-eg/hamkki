@@ -2,31 +2,50 @@
 {% block content %}
 
 <section class="hk-hero">
-  <h1>오늘, 누구랑<br>어디서 먹을까요?</h1>
+  {# 시간대 인사말: 휴대폰 시각에 맞춰 아래 스크립트가 바꾼다 #}
+  <span class="hk-hero-badge">
+    {# 시간대별 선 아이콘 (화면에서 지금 시각에 맞는 것 하나만 보인다) #}
+    <svg class="hk-greet-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <g data-slot="morning"><path d="M4 17h16M7 17a5 5 0 0 1 10 0M12 7V5M6.3 10.3 5 9M17.7 10.3 19 9"/></g>
+      <g data-slot="lunch"><path d="M7 3v6a2 2 0 0 0 4 0V3M9 3v18M16 3c-1.7 0-3 2.2-3 5s1.3 4 3 4v9M16 3v9"/></g>
+      <g data-slot="dinner"><path d="M3 16h18M6 16a6 6 0 0 1 12 0M12 7V5M5.3 10 4 8.7M18.7 10 20 8.7M8 20h8"/></g>
+      <g data-slot="night"><path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"/><path d="M17 4v3M15.5 5.5h3"/></g>
+    </svg>
+    <span id="hk-greet">약속 장소 고민될 때</span>
+  </span>
+  <h1>오늘, 누구랑<br><em>어디서</em> 먹을까요?</h1>
   <p>상황만 알려주세요. 고르는 건 함끼가, 정하는 건 다 같이.</p>
+  <ol class="hk-steps" aria-label="이용 순서">
+    <li><b>1</b>조건 입력</li>
+    <li><b>2</b>AI가 3곳 추천</li>
+    <li><b>3</b>친구들과 투표</li>
+  </ol>
 </section>
 
-<form action="{{ url_for('recommend') }}" method="post" class="hk-form" id="hk-form">
+<form action="{{ url_for('recommend') }}" method="post" class="hk-form" id="hk-form"
+      data-loading="근처 식당을 찾고 있어요|상황에 맞는 후보를 추리고 있어요|함끼가 3곳을 고르는 중이에요|추천 이유를 쓰고 있어요|거의 다 됐어요">
 
   <div class="hk-field">
     <label class="hk-label" for="place_query">어디 근처에서 찾을까요?</label>
     <div class="hk-search">
-      <span class="hk-search-icon" aria-hidden="true">📍</span>
+      <span class="hk-search-icon" aria-hidden="true">{{ icon("pin") }}</span>
       <input type="text" id="place_query" name="place_query" class="form-control"
              placeholder="역, 동네, 학교, 건물 이름" autocomplete="off" maxlength="40"
              value="{{ default_place }}"
              role="combobox" aria-expanded="false" aria-controls="hk-suggest" required>
       <ul id="hk-suggest" class="hk-suggest" role="listbox" hidden></ul>
+      {# 현재 위치로 찾기: 지도 앱처럼 검색창 오른쪽 끝 #}
+      <button type="button" class="hk-locate-btn" id="hk-locate-btn" aria-label="현재 위치로 찾기">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle class="dot" cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        <span id="hk-locate-label">내 위치</span>
+      </button>
     </div>
     <input type="hidden" name="place_name" id="place_name">
     <input type="hidden" name="place_x" id="place_x">
     <input type="hidden" name="place_y" id="place_y">
     <input type="hidden" name="place_source" id="place_source">
 
-    <div class="hk-locate">
-      <button type="button" class="hk-locate-btn" id="hk-locate-btn">🎯 현재 위치로 찾기</button>
-      <span class="hk-locate-msg" id="hk-locate-msg" role="status"></span>
-    </div>
+    <p class="hk-locate-msg" id="hk-locate-msg" role="status"></p>
 
     {% if quick %}
     <div class="hk-quick">
@@ -45,7 +64,7 @@
       <input type="radio" class="btn-check" name="situation" id="sit-{{ loop.index }}"
              value="{{ name }}" {% if name == "친구" %}checked{% endif %}>
       <label class="hk-chip" for="sit-{{ loop.index }}">
-        <span class="hk-chip-emoji">{{ s.emoji }}</span>{{ name }}
+        <span class="hk-chip-icon">{{ icon(s.icon) }}</span>{{ name }}
       </label>
       {% endfor %}
     </div>
@@ -61,25 +80,24 @@
       </div>
     </div>
     <div class="hk-field">
-      <label class="hk-label" for="time_slot">시간대</label>
+      <label class="hk-label" for="time_slot">시간대 <small class="hk-optional">선택</small></label>
       <select class="form-select" id="time_slot" name="time_slot">
-        {% for t in time_slots %}
-        <option {% if t == "저녁" %}selected{% endif %}>{{ t }}</option>
-        {% endfor %}
+        <option value="">상관없음</option>
+        {% for t in time_slots %}<option>{{ t }}</option>{% endfor %}
       </select>
     </div>
   </div>
 
   <div class="hk-row">
     <div class="hk-field">
-      <label class="hk-label" for="budget">1인 예산</label>
+      <label class="hk-label" for="budget">1인 예산 <small class="hk-optional">선택</small></label>
       <select class="form-select" id="budget" name="budget">
         <option value="">상관없음</option>
         {% for b in budgets %}<option>{{ b }}</option>{% endfor %}
       </select>
     </div>
     <div class="hk-field">
-      <label class="hk-label" for="kind">음식 종류</label>
+      <label class="hk-label" for="kind">음식 종류 <small class="hk-optional">선택</small></label>
       <select class="form-select" id="kind" name="kind">
         <option value="">상관없음</option>
         {% for k in kinds %}<option>{{ k }}</option>{% endfor %}
@@ -88,13 +106,13 @@
   </div>
 
   <div class="hk-field">
-    <label class="hk-label" for="wish">원하는 분위기를 자유롭게 적어주세요</label>
+    <label class="hk-label" for="wish">원하는 분위기를 자유롭게 적어주세요 <small class="hk-optional">선택</small></label>
     <textarea class="form-control" id="wish" name="wish" rows="3" maxlength="200"
       placeholder="예) 부모님 모시고 갈 조용한 한식집"></textarea>
   </div>
 
   <button type="submit" class="hk-submit" id="hk-submit">함끼에게 맡겨보기</button>
-  <p class="hk-submit-hint" id="hk-submit-hint" hidden>처음 찾는 지역이면 식당 정보를 모으느라 20~30초 걸릴 수 있어요.</p>
+  <p class="hk-submit-hint">처음 찾는 지역이면 식당 정보를 모으느라 20~30초 더 걸릴 수 있어요.</p>
 </form>
 
 <script>
@@ -178,15 +196,18 @@
   // 위치 권한은 https 주소(또는 localhost)에서만 물어볼 수 있다.
   const locBtn = document.getElementById("hk-locate-btn");
   const locMsg = document.getElementById("hk-locate-msg");
+  const locLabel = document.getElementById("hk-locate-label");
   function locDone(text) {
     locBtn.disabled = false;
-    locBtn.textContent = "🎯 현재 위치로 찾기";
+    locBtn.classList.remove("is-busy");
+    locLabel.textContent = "내 위치";
     locMsg.textContent = text || "";
   }
   locBtn.addEventListener("click", () => {
     if (!navigator.geolocation) { locDone("이 브라우저는 위치 찾기를 지원하지 않아요."); return; }
     locBtn.disabled = true;
-    locBtn.textContent = "위치 확인 중…";
+    locBtn.classList.add("is-busy");
+    locLabel.textContent = "찾는 중";
     locMsg.textContent = "";
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const x = pos.coords.longitude.toFixed(6), y = pos.coords.latitude.toFixed(6);
@@ -214,21 +235,30 @@
     }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
   });
 
-  // ---------- 시간대 자동 선택 ----------
-  // 휴대폰의 지금 시각으로 미리 골라 둔다 (서버는 해외 시간이라 화면에서 정한다). 직접 바꾸면 그대로 쓴다.
+  // ---------- 첫 화면 인사말: 휴대폰의 지금 시각에 맞춘다 ----------
+  // (서버는 해외 시간이라 화면에서 정한다. 시간대 선택은 '상관없음'이 기본인 선택 사항)
   (function () {
-    const sel = document.getElementById("time_slot");
     const h = new Date().getHours();
-    const slot = h >= 5 && h < 15 ? "점심" : h >= 15 && h < 22 ? "저녁" : "늦은 밤";
-    if ([...sel.options].some((o) => o.value === slot)) sel.value = slot;
+
+    const greet = h >= 5 && h < 10 ? "오늘 점심 약속, 미리 정해 볼까요?"
+                : h >= 10 && h < 15 ? "점심시간, 메뉴 고민은 이제 그만"
+                : h >= 15 && h < 22 ? "저녁 약속 장소, 아직 못 정했다면"
+                : "늦은 밤, 출출할 땐";
+    document.getElementById("hk-greet").textContent = greet;
+    const slotKey = h >= 5 && h < 10 ? "morning" : h >= 10 && h < 15 ? "lunch" : h >= 15 && h < 22 ? "dinner" : "night";
+    document.querySelectorAll(".hk-greet-icon [data-slot]").forEach((g) => g.classList.toggle("is-on", g.dataset.slot === slotKey));
   })();
 
-  // 제출하면 버튼을 잠그고 기다리는 안내를 보여준다
+  // 제출하면 버튼을 잠근다 (두 번 누르지 않게). 기다리는 화면은 base.html이 띄운다.
+  const submitBtn = document.getElementById("hk-submit");
   document.getElementById("hk-form").addEventListener("submit", () => {
-    const btn = document.getElementById("hk-submit");
-    btn.disabled = true;
-    btn.textContent = "함끼가 고르는 중…";
-    document.getElementById("hk-submit-hint").hidden = false;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "함끼가 고르는 중…";
+  });
+  // 결과에서 뒤로 가기로 돌아오면 버튼을 원래대로
+  window.addEventListener("pageshow", () => {
+    submitBtn.disabled = false;
+    submitBtn.textContent = "함끼에게 맡겨보기";
   });
 </script>
 {% endblock %}

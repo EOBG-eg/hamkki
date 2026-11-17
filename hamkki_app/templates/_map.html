@@ -42,7 +42,10 @@
     // 검색한 장소 (기준점)
     var here = document.createElement("div");
     here.className = "hk-pin-here";
-    here.textContent = "📍 " + data.center.name;   // textContent: 이름에 태그가 섞여도 그대로 글자로만 표시
+    here.innerHTML = {{ icon("pin")|string|tojson }};   // 아이콘은 우리가 만든 고정 SVG
+    var hereName = document.createElement("span");
+    hereName.textContent = data.center.name;   // textContent: 이름에 태그가 섞여도 그대로 글자로만 표시
+    here.appendChild(hereName);
     new kakao.maps.CustomOverlay({ map: map, position: center, content: here, yAnchor: 1.3, zIndex: 1 });
 
     // 식당 핀 (번호 = 카드 순서)

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}함께 정하기{% endblock %}
-{# 카톡 미리보기: 투표 링크를 보내면 지역과 후보 이름이 보이게 #}
+{# 공유 미리보기: 투표 링크를 보내면 지역과 후보 이름이 보이게 #}
 {% block og_title %}{% if vote %}{% if decided %}✅ {{ decided.name }}(으)로 결정했어요{% else %}🍚 {{ c.region }} 근처, 어디로 갈까요?{% endif %}{% else %}함끼 · 함께 정하는 한 끼{% endif %}{% endblock %}
 {% block og_desc %}{% if vote %}{% if decided %}{{ c.region }} 근처 · 함끼 투표 결과를 확인하고 길찾기를 열어 보세요.{% else %}{{ vote.options|map(attribute="name")|join(" · ") }} 중에서 골라 주세요. 로그인 없이 이름만 적으면 돼요.{% endif %}{% else %}AI가 고르고, 함께 정하는 한 끼{% endif %}{% endblock %}
 {% block content %}
@@ -14,8 +14,8 @@
 
 <section class="hk-summary">
   <div class="hk-summary-tags">
-    <span>📍 {{ c.region }}</span>
-    <span>{{ c.emoji }} {{ c.situation }}</span>
+    <span>{{ icon("pin") }} {{ c.region }}</span>
+    <span>{% if c.icon %}{{ icon(c.icon) }}{% else %}{{ c.emoji }}{% endif %} {{ c.situation }}</span>
     <span>{{ c.people }}명</span>
     {% if c.time_slot %}<span>{{ c.time_slot }}</span>{% endif %}
     {% if c.budget %}<span>{{ c.budget }}</span>{% endif %}
@@ -27,7 +27,7 @@
 {# ---------- 최종 결정 ---------- #}
 {% if decided %}
 <section class="hk-decided">
-  <p class="hk-decided-label">✅ 여기로 결정했어요!</p>
+  <p class="hk-decided-label">{{ icon("check") }} 여기로 결정했어요!</p>
   <h2>{{ decided.name }}</h2>
   <p class="hk-decided-meta">{{ decided.kind }}{% if decided.detail %} · {{ decided.detail }}{% endif %} · {{ c.region }}에서 {{ decided.distance }}m
     {% if counts[decided.id] %}· {{ counts[decided.id]|length }}표{% endif %}</p>
@@ -47,18 +47,18 @@
 
 {# ---------- 공유 ---------- #}
 <section class="hk-share {% if is_new %}is-new{% endif %}">
-  {% if is_new %}<p class="hk-share-title">🎉 투표를 만들었어요! 같이 갈 사람들에게 링크를 보내 주세요.</p>
-  {% else %}<p class="hk-share-title">👥 같이 갈 사람에게 링크 보내기</p>{% endif %}
+  {% if is_new %}<p class="hk-share-title">{{ icon("party") }} 투표를 만들었어요! 같이 갈 사람들에게 링크를 보내 주세요.</p>
+  {% else %}<p class="hk-share-title">{{ icon("users") }} 같이 갈 사람에게 링크 보내기</p>{% endif %}
   <div class="hk-share-row">
     <input type="text" class="form-control" id="hk-share-url" value="{{ share_url }}" readonly>
     <button type="button" class="hk-share-btn" id="hk-share-btn">공유</button>
   </div>
-  <p class="hk-share-done" id="hk-share-done" hidden>링크를 복사했어요. 카톡 대화방에 붙여넣어 주세요.</p>
+  <p class="hk-share-done" id="hk-share-done" hidden>링크를 복사했어요. 단톡방이나 메신저에 붙여넣어 주세요.</p>
 </section>
 
 {# ---------- 현재 결과 ---------- #}
 <section class="hk-ai">
-  <p class="hk-ai-label">🗳️ {{ "투표 결과" if decided else "어디로 갈까요?" }}</p>
+  <p class="hk-ai-label">{{ icon("ballot") }} {{ "투표 결과" if decided else "어디로 갈까요?" }}</p>
   {% if decided %}
     <p class="hk-vote-status">투표가 마감됐어요 · 총 {{ total }}명 참여</p>
   {% elif total == 0 %}
@@ -70,7 +70,7 @@
   {% else %}
     <p class="hk-vote-status">{{ leaders|length }}곳이 동점이에요 · 총 {{ total }}명 참여</p>
   {% endif %}
-  {% if just_voted and mine %}<p class="hk-vote-mine">✅ {{ mine.name }}님의 표가 반영됐어요. 다시 고르면 표가 바뀌어요.</p>{% endif %}
+  {% if just_voted and mine %}<p class="hk-vote-mine">{{ icon("check") }} {{ mine.name }}님의 표가 반영됐어요. 다시 고르면 표가 바뀌어요.</p>{% endif %}
 </section>
 
 {% include "_map.html" %}
@@ -88,7 +88,7 @@
                {% if mine and mine.pick == o.id %}checked{% endif %} {% if decided %}disabled{% endif %}>
         <span class="hk-vote-check" aria-hidden="true"></span>
         <div class="hk-card-top">
-          <h2>{{ o.name }}{% if o.id in leaders %} 👑{% endif %}</h2>
+          <h2>{{ o.name }}{% if o.id in leaders %} {{ icon("crown", "hk-ic-crown") }}{% endif %}</h2>
           <span class="hk-dist">{{ o.distance }}m</span>
         </div>
         <div class="hk-card-meta">
@@ -129,7 +129,7 @@
 {% if is_owner and not decided %}
 <form method="post" class="hk-owner">
   <input type="hidden" name="action" value="decide">
-  <p class="hk-owner-title">👑 투표를 만든 분만 보여요</p>
+  <p class="hk-owner-title">{{ icon("crown") }} 투표를 만든 분만 보여요</p>
   <p class="hk-owner-desc">다 모였으면 갈 곳을 확정하세요. 확정하면 투표가 마감되고, 링크를 연 모두에게 결정한 식당과 길찾기가 보여요.</p>
   <div class="hk-owner-row">
     <select name="pick" class="form-select" aria-label="결정할 식당">
@@ -153,7 +153,7 @@
   var done = document.getElementById("hk-share-done");
   btn.addEventListener("click", function () {
     var url = input.value;
-    // 휴대폰에서는 공유창(카톡 등)을, 안 되는 브라우저에서는 링크 복사를 쓴다
+    // 휴대폰에서는 기본 공유창(어느 메신저든)을, 안 되는 브라우저에서는 링크 복사를 쓴다
     if (navigator.share) {
       navigator.share({ title: {{ (("함끼 · " ~ decided.name ~ "(으)로 결정!") if decided else "함끼 · 어디로 갈까요?") | tojson }},
                         text: {{ ("여기로 정했어! 길찾기는 링크에서 확인해 줘." if decided else "같이 갈 식당 투표해 줘!") | tojson }}, url: url })

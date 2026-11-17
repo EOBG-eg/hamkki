@@ -71,11 +71,12 @@ python app.py                → http://localhost:5000
 
 8. 투표를 만든 브라우저(`owner` = `hk_voter` 쿠키)만 '여기로 결정' → `decided` 저장, 투표 마감, 모두에게 결정 식당·길찾기 배너. 결정 취소(reopen) 가능
 9. Gemini 쿼터 보호(`ai_limit_reason`): IP당 10분 6회, 서버 전체 하루 `AI_DAILY_LIMIT`(기본 300). 넘으면 AI 없이 후보 목록. 메모리 기록이라 재시작 시 초기화
-10. 카톡 공유 미리보기: base.html Open Graph 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
+10. 공유 미리보기(메신저 공통): base.html Open Graph + X(twitter:card) 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
 11. 현재 위치로 찾기: 브라우저 GPS → `/api/where`(카카오 coord2regioncode, 법정동 이름) → '현재 위치 · ○○동'. `place_source=gps`면 좌표를 소수 셋째 자리(약 100m)로 흐리고 '바로 찾기'(places.json)에 기록 안 함. https/localhost에서만 동작
 12. 시간대: 첫 화면 JS가 휴대폰 시각으로 미리 선택 (5~15시 점심, 15~22시 저녁, 그 외 늦은 밤). 서버(Render)는 UTC라 서버에서 정하면 틀림
 13. 추천 만족도(`feedback_store.py`): AI 추천마다 rec_id 한 줄(상황·재추천 횟수·분위기 문장 유무·GPS 여부만, 장소·문장 저장 안 함) → 결과 화면 👍👎(+👎 이유 5개 중 선택) → 투표 만들면 vote ID 연결. DB `feedback` 표 / 파일 `data/feedback.json`
 14. 관리용 통계 `/admin/stats?key=ADMIN_KEY` (환경변수 ADMIN_KEY 없으면 404): 👍 비율, 재추천 단계별·상황별, 👎 이유, 투표로 이어진 비율, 투표 참여·결정 비율 → 보고서·발표 근거
+15. 디자인(11/17): 로고 = 두 공기 + 하트 김(base.html SVG, '짠' 애니메이션), 인트로(탭마다 1회, sessionStorage), 기다리는 화면(data-loading 폼), 선 아이콘 세트 `icons.py`(`{{ icon("pin") }}`, 이모지 대신), 앱 아이콘·manifest(홈 화면 추가), 시간대는 선택 사항(기본 '상관없음'), 첫 화면 인사말은 휴대폰 시각 기준. 아이콘 PNG·og.png는 SVG를 Edge 헤드리스로 렌더링해 만듦
 
 수집 세부:
 - 칸은 동시에 4개씩 수집 (`COLLECT_WORKERS`, 의정부역 1km 빈 상태 기준 50초 → 19초)

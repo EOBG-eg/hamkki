@@ -97,7 +97,7 @@ def _build_prompt(conditions, candidates):
 지역: {conditions.get('region', '')} 근처
 상황: {conditions['situation']}
 인원: {conditions['people']}명
-시간대: {conditions['time_slot']}
+시간대: {conditions['time_slot'] or '상관없음'}
 1인 예산: {conditions['budget'] or '상관없음'}
 원하는 음식 종류: {conditions['kind'] or '상관없음'}
 분위기 요청: {wish}

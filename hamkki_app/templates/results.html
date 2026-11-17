@@ -4,17 +4,17 @@
 
 <section class="hk-summary">
   <div class="hk-summary-tags">
-    <span>📍 {{ c.region }}</span>
-    <span>{{ c.emoji }} {{ c.situation }}</span>
+    <span>{{ icon("pin") }} {{ c.region }}</span>
+    <span>{% if c.icon %}{{ icon(c.icon) }}{% else %}{{ c.emoji }}{% endif %} {{ c.situation }}</span>
     <span>{{ c.people }}명</span>
-    <span>{{ c.time_slot }}</span>
+    {% if c.time_slot %}<span>{{ c.time_slot }}</span>{% endif %}
     {% if c.budget %}<span>{{ c.budget }}</span>{% endif %}
     {% if c.kind %}<span>{{ c.kind }}</span>{% endif %}
   </div>
   {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
   {% if c.followups %}
   <ul class="hk-followups">
-    {% for t in c.followups %}<li>➕ {{ t }}</li>{% endfor %}
+    {% for t in c.followups %}<li>{{ icon("plus") }} {{ t }}</li>{% endfor %}
   </ul>
   {% endif %}
 </section>
@@ -44,13 +44,13 @@
 {% elif ai %}
   {# ---------- AI 추천 성공 ---------- #}
   <section class="hk-ai">
-    <p class="hk-ai-label">✨ 함끼가 고른 {{ ai.picks|length }}곳</p>
+    <p class="hk-ai-label">{{ icon("sparkle") }} 함끼가 고른 {{ ai.picks|length }}곳</p>
     {% if ai.summary %}<p class="hk-ai-summary">{{ ai.summary }}</p>{% endif %}
   </section>
 
   {% include "_map.html" %}
 
-  <ol class="hk-list hk-picks">
+  <ol class="hk-list hk-picks hk-ranked">
     {% for r in ai.picks %}
     <li class="hk-card hk-pick" id="place-{{ r.id }}">
       <span class="hk-rank">{{ loop.index }}</span>
@@ -79,8 +79,8 @@
   <section class="hk-feedback" id="hk-feedback" data-rec="{{ rec_id }}">
     <p class="hk-feedback-q">이 추천 어땠나요?</p>
     <div class="hk-feedback-btns">
-      <button type="button" data-rate="up">👍 괜찮아요</button>
-      <button type="button" data-rate="down">👎 아쉬워요</button>
+      <button type="button" data-rate="up">{{ icon("up") }} 괜찮아요</button>
+      <button type="button" data-rate="down">{{ icon("down") }} 아쉬워요</button>
     </div>
     <div class="hk-feedback-why" hidden>
       <p>어떤 점이 아쉬웠나요? (여러 개 골라도 돼요)</p>
@@ -94,7 +94,8 @@
 
   {# ---------- 조건 덧붙여 다시 추천 ---------- #}
   {% if can_follow_up %}
-  <form method="post" action="{{ url_for('recommend') }}" class="hk-refine" id="hk-refine">
+  <form method="post" action="{{ url_for('recommend') }}" class="hk-refine" id="hk-refine"
+        data-loading="요청을 읽고 있어요|아직 안 보여드린 곳을 살펴보고 있어요|함끼가 다시 고르는 중이에요|거의 다 됐어요">
     {# 처음 조건을 그대로 다시 보낸다 #}
     <input type="hidden" name="place_name" value="{{ place.name }}">
     <input type="hidden" name="place_x" value="{{ place.x }}">
@@ -111,7 +112,7 @@
     {% for i in c.seen_ids %}{% if i not in ai.picks|map(attribute="id") %}<input type="hidden" name="seen" value="{{ i }}">{% endif %}{% endfor %}
     {% for r in ai.picks %}<input type="hidden" name="seen" value="{{ r.id }}">{% endfor %}
 
-    <p class="hk-refine-title">🔁 마음에 안 들면 조건을 덧붙여 보세요</p>
+    <p class="hk-refine-title">{{ icon("refresh") }} 마음에 안 들면 조건을 덧붙여 보세요</p>
     <div class="hk-quick">
       {% for t in followup_chips %}
       <button type="button" class="hk-quick-chip" data-followup="{{ t }}">{{ t }}</button>
@@ -136,10 +137,12 @@
       });
     });
     // AI가 다시 고르는 동안(최대 40초) 두 번 누르지 않게
+    var btnText = btn.textContent;
     form.addEventListener("submit", function () {
       btn.disabled = true;
       btn.textContent = "고르는 중…";
     });
+    window.addEventListener("pageshow", function () { btn.disabled = false; btn.textContent = btnText; });
   })();
   </script>
   {% else %}
@@ -192,7 +195,7 @@
 {% if vote_payload %}
 <form method="post" action="{{ url_for('vote_create') }}" class="hk-vote-make">
   <input type="hidden" name="payload" value="{{ vote_payload }}">
-  <button type="submit" class="hk-submit">👥 친구들과 투표로 정하기</button>
+  <button type="submit" class="hk-submit">{{ icon("users") }} 친구들과 투표로 정하기</button>
   <p class="hk-submit-hint">{{ "추천 3곳" if ai else "위 후보 중 앞의 3곳" }}으로 투표 링크를 만들어요. 로그인 없이 이름만 적고 투표해요.</p>
 </form>
 {% endif %}
@@ -215,7 +218,7 @@
       body: JSON.stringify({ rec: box.dataset.rec, rating: rating, reasons: reasons })
     }).then(function (res) {
       thanks.textContent = res.ok
-        ? (rating === "up" ? "고마워요! 맛있게 드세요 🍚"
+        ? (rating === "up" ? "고마워요! 맛있게 드세요."
                            : "알려 줘서 고마워요. 아래에서 조건을 덧붙여 다시 추천받을 수 있어요.")
         : "저장하지 못했어요. 잠시 후 다시 눌러 주세요.";
     }).catch(function () { thanks.textContent = "저장하지 못했어요. 잠시 후 다시 눌러 주세요."; });

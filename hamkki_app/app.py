@@ -49,6 +49,7 @@ import collect_restaurants as collector  # noqa: E402
 import db  # noqa: E402
 import vote_store  # noqa: E402  (db.py를 쓰므로 경로 추가 뒤에)
 import feedback_store  # noqa: E402
+from icons import icon  # noqa: E402
 
 if db.enabled():  # 배포 서버: 시작할 때 DB 연결을 한 번 확인해서 로그에 남긴다
     print("[DB]", db.check()[1], flush=True)
@@ -56,6 +57,7 @@ else:
     print("[DB] DATABASE_URL 없음 → data/ 폴더 파일에 저장", flush=True)
 
 app = Flask(__name__)
+app.jinja_env.globals["icon"] = icon   # 템플릿에서 {{ icon("pin") }}
 # Render는 앞단 서버가 https를 받고 우리 앱에는 http로 넘겨준다.
 # 이 설정이 없으면 공유 링크가 http://... 로 만들어지고 쿠키 secure 판단도 틀린다.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -96,26 +98,31 @@ collector.migrate_legacy()
 SITUATIONS = {
     "데이트": {
         "emoji": "💑",
+        "icon": "date",   # 화면 아이콘 (icons.py)
         "prefer": {"양식", "일식", "아시아음식", "퓨전요리", "샐러드", "패밀리레스토랑"},
         "avoid": {"분식", "패스트푸드"},
     },
     "가족": {
         "emoji": "👨‍👩‍👧",
+        "icon": "family",   # 화면 아이콘 (icons.py)
         "prefer": {"한식", "중식", "뷔페", "샤브샤브", "패밀리레스토랑"},
         "avoid": {"술집"},
     },
     "친구": {
         "emoji": "🙌",
+        "icon": "friends",   # 화면 아이콘 (icons.py)
         "prefer": {"술집", "치킨", "양식", "아시아음식"},
         "avoid": set(),
     },
     "회식": {
         "emoji": "🍻",
+        "icon": "team",   # 화면 아이콘 (icons.py)
         "prefer": {"한식", "술집", "중식", "샤브샤브"},
         "avoid": {"패스트푸드", "분식", "샐러드"},
     },
     "혼밥": {
         "emoji": "🍜",
+        "icon": "solo",   # 화면 아이콘 (icons.py)
         "prefer": {"분식", "패스트푸드", "한식", "일식"},
         "avoid": {"뷔페", "술집"},
     },
@@ -332,7 +339,7 @@ def recommend():
     place = resolve_place(request.form)
     if not place:
         return render_template("results.html", c={"region": request.form.get("place_query", ""),
-                               "situation": situation, "emoji": SITUATIONS[situation]["emoji"],
+                               "situation": situation, "emoji": SITUATIONS[situation]["emoji"], "icon": SITUATIONS[situation]["icon"],
                                "people": people, "time_slot": "", "budget": "", "kind": "", "wish": ""},
                                candidates=[], ai=None, ai_error=None, has_data=True,
                                place_not_found=True)
@@ -341,8 +348,10 @@ def recommend():
         "region": place["name"],
         "situation": situation,
         "emoji": SITUATIONS[situation]["emoji"],
+        "icon": SITUATIONS[situation]["icon"],
         "people": people,
-        "time_slot": request.form.get("time_slot", "저녁"),
+        # 시간대는 선택 사항: 비어 있으면 '상관없음' (정해진 값만 받는다)
+        "time_slot": request.form.get("time_slot", "") if request.form.get("time_slot", "") in TIME_SLOTS else "",
         "budget": request.form.get("budget", ""),
         "kind": request.form.get("kind", ""),
         "wish": request.form.get("wish", "").strip()[:200],

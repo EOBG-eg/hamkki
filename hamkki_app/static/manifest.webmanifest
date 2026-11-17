@@ -1,0 +1,16 @@
+{
+  "name": "함끼 · AI가 고르고, 함께 정하는 한 끼",
+  "short_name": "함끼",
+  "description": "상황만 말하면 AI가 근처 식당 3곳을 골라 주고, 친구들과 링크 하나로 투표해서 정해요.",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fbf7f1",
+  "theme_color": "#e2552d",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
