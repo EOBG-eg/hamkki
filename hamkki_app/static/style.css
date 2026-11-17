@@ -369,3 +369,56 @@ body {
 .hk-refine-title { font-weight: 700; font-size: .9rem; margin: 0; }
 .hk-refine-limit { margin-top: 16px; font-size: .85rem; color: var(--hk-muted); }
 .hk-share-btn:disabled { opacity: .6; }
+
+/* 최종 결정 (투표 마감) */
+.hk-decided {
+  background: var(--hk-accent);
+  color: #fff;
+  border-radius: 18px;
+  padding: 18px 18px 14px;
+  margin-bottom: 16px;
+}
+.hk-decided-label { font-weight: 700; font-size: .9rem; margin: 0 0 4px; opacity: .9; }
+.hk-decided h2 { font-size: 1.5rem; font-weight: 700; margin: 0 0 6px; }
+.hk-decided-meta, .hk-decided-addr { font-size: .85rem; margin: 0 0 2px; opacity: .9; }
+.hk-decided-links { display: flex; gap: 8px; margin-top: 12px; }
+.hk-decided-links a {
+  flex: 1;
+  text-align: center;
+  border-radius: 12px;
+  padding: 11px 0;
+  font-weight: 700;
+  text-decoration: none;
+}
+.hk-decided-go { background: #fff; color: var(--hk-accent); }
+.hk-decided-more { border: 1px solid rgba(255, 255, 255, .7); color: #fff; }
+.hk-decided-reopen { margin: 10px 0 0; text-align: center; }
+.hk-decided-reopen .hk-link-btn { color: #fff; opacity: .85; font-size: .8rem; text-decoration: underline; }
+.hk-vote-pick input:disabled ~ .hk-vote-check { opacity: .35; }
+
+/* 만든 사람: 최종 결정 상자 */
+.hk-owner {
+  background: var(--hk-card);
+  border: 1px dashed var(--hk-accent);
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin: 18px 0 6px;
+}
+.hk-owner-title { font-weight: 700; font-size: .9rem; margin: 0 0 4px; }
+.hk-owner-desc { font-size: .8rem; color: var(--hk-muted); margin: 0 0 10px; }
+.hk-owner-row { display: flex; gap: 8px; }
+.hk-owner-row .form-select { font-size: .85rem; min-width: 0; }
+
+/* 현재 위치로 찾기 */
+.hk-locate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.hk-locate-btn {
+  border: 1px solid var(--hk-accent);
+  border-radius: 999px;
+  background: var(--hk-card);
+  color: var(--hk-accent);
+  font-weight: 700;
+  font-size: .85rem;
+  padding: 6px 14px;
+}
+.hk-locate-btn:disabled { opacity: .6; }
+.hk-locate-msg { font-size: .8rem; color: var(--hk-muted); }

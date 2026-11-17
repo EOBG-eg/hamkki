@@ -32,6 +32,8 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
+import db  # DATABASE_URL이 있으면 새로 모은 칸을 Postgres에도 저장 (db.py)
+
 # 학교·회사 네트워크에서 인증서 오류가 나는 경우를 위해 OS 인증서 목록을 쓴다 (app.py와 같은 방식)
 try:
     import truststore
@@ -153,20 +155,59 @@ def distance_m(x1, y1, x2, y2):
 # ---------------------------------------------------------------
 # 저장된 칸 읽기
 # ---------------------------------------------------------------
+# 저장 위치
+#  - 파일(data/): 내 PC, 그리고 배포 서버가 빌드 때 미리 모은 칸
+#  - DB(DATABASE_URL이 있을 때): 배포 서버가 실행 중에 새로 모은 칸
+# 읽을 때는 둘을 합치고, 같은 칸이 둘 다 있으면 DB 쪽(더 최근)을 쓴다.
+# DB가 잠깐 안 되더라도 추천은 계속되도록 파일로 대신한다.
 def load_tile_index():
-    return _read_json(TILE_INDEX_FILE, {})
+    index = _read_json(TILE_INDEX_FILE, {})
+    if db.enabled():
+        try:
+            index.update(db.tile_index())
+        except db.DBError as e:
+            db.warn(e)
+    return index
+
+
+def load_tiles(keys):
+    """여러 칸을 한 번에 읽는다. {칸 번호: 식당 목록}"""
+    found = {}
+    if db.enabled():
+        try:
+            found = db.tiles(keys)
+        except db.DBError as e:
+            db.warn(e)
+    for k in keys:
+        if k not in found:
+            found[k] = _read_json(os.path.join(TILE_DIR, f"{k}.json"), [])
+    return found
 
 
 def load_tile(key):
-    return _read_json(os.path.join(TILE_DIR, f"{key}.json"), [])
+    return load_tiles([key])[key]
 
 
 def load_named_places():
-    return _read_json(PLACES_FILE, {})
+    places = _read_json(PLACES_FILE, {})
+    if db.enabled():
+        try:
+            places.update(db.named_places())
+        except db.DBError as e:
+            db.warn(e)
+    return places
 
 
 def remember_place(name, x, y):
     """검색된 장소 이름을 기록한다. (첫 화면 '바로 찾기' 버튼용)"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if db.enabled():
+        try:
+            before = _read_json(PLACES_FILE, {}).get(name, {})  # 빌드 때 기록된 횟수 이어받기
+            db.remember_place(name, {"x": x, "y": y, "searches": before.get("searches", 0) + 1, "last": now})
+            return
+        except db.DBError as e:
+            db.warn(e)
     with _lock:
         places = load_named_places()
         info = places.get(name, {"x": x, "y": y, "searches": 0})
@@ -245,6 +286,18 @@ def kakao_get(url, params, retries=3):
 
 
 ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
+REGION_CODE_URL = "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json"
+
+
+def region_name_at(x, y):
+    """좌표가 속한 동네 이름 ('현재 위치로 찾기'용). 예: '의정부동'. 못 찾으면 빈 문자열.
+    법정동(B)을 쓴다. 행정동(H)은 '의정부1동'처럼 사람들이 잘 안 쓰는 이름이 많다."""
+    data = kakao_get(REGION_CODE_URL, {"x": x, "y": y}, retries=1)  # 화면에서 기다리므로 재시도 1번만
+    docs = data.get("documents", [])
+    doc = next((d for d in docs if d.get("region_type") == "B"), docs[0] if docs else None)
+    if not doc:
+        return ""
+    return doc.get("region_3depth_name") or doc.get("region_2depth_name") or ""
 REGION_SUFFIXES = ("동", "읍", "면", "리", "가", "구", "시", "군")
 
 
@@ -335,17 +388,23 @@ def collect_cell(min_x, min_y, max_x, max_y, results, depth=0, verbose=True):
 # 칸 수집
 # ---------------------------------------------------------------
 def _save_tile(key, places, partial=False, source="kakao", covered=None):
+    entry = {
+        "count": len(places),
+        "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "source": source,
+    }
+    if partial:
+        entry["partial"] = True    # 일부만 들어 있음 → 필요할 때 나머지만 수집
+        entry["covered"] = covered  # 이미 모은 범위 (서, 남, 동, 북)
+    if db.enabled():
+        try:
+            db.save_tile(key, entry, places)
+            return
+        except db.DBError as e:
+            db.warn(e)
     _write_json(os.path.join(TILE_DIR, f"{key}.json"), places)
     with _lock:
-        index = load_tile_index()
-        entry = {
-            "count": len(places),
-            "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "source": source,
-        }
-        if partial:
-            entry["partial"] = True    # 일부만 들어 있음 → 필요할 때 나머지만 수집
-            entry["covered"] = covered  # 이미 모은 범위 (서, 남, 동, 북)
+        index = _read_json(TILE_INDEX_FILE, {})
         index[key] = entry
         _write_json(TILE_INDEX_FILE, index)
 
@@ -434,8 +493,13 @@ def ensure_area(x, y, radius_m, max_new_tiles=None, refresh=False, verbose=True)
 
 
 def _forget_tile(key):
+    if db.enabled():
+        try:
+            db.delete_tile(key)
+        except db.DBError as e:
+            db.warn(e)
     with _lock:
-        index = load_tile_index()
+        index = _read_json(TILE_INDEX_FILE, {})
         index.pop(key, None)
         _write_json(TILE_INDEX_FILE, index)
 
@@ -448,8 +512,8 @@ def _tile_center(key):
 def places_near(x, y, radius_m):
     """좌표 반경 안의 식당과 거리(미터). 필요한 칸만 읽는다."""
     found = []
-    for key in tiles_covering(x, y, radius_m):
-        for p in load_tile(key):
+    for places in load_tiles(tiles_covering(x, y, radius_m)).values():
+        for p in places:
             d = distance_m(x, y, float(p["x"]), float(p["y"]))
             if d <= radius_m:
                 found.append((p, int(d)))

@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}함께 정하기{% endblock %}
+{# 카톡 미리보기: 투표 링크를 보내면 지역과 후보 이름이 보이게 #}
+{% block og_title %}{% if vote %}{% if decided %}✅ {{ decided.name }}(으)로 결정했어요{% else %}🍚 {{ c.region }} 근처, 어디로 갈까요?{% endif %}{% else %}함끼 · 함께 정하는 한 끼{% endif %}{% endblock %}
+{% block og_desc %}{% if vote %}{% if decided %}{{ c.region }} 근처 · 함끼 투표 결과를 확인하고 길찾기를 열어 보세요.{% else %}{{ vote.options|map(attribute="name")|join(" · ") }} 중에서 골라 주세요. 로그인 없이 이름만 적으면 돼요.{% endif %}{% else %}AI가 고르고, 함께 정하는 한 끼{% endif %}{% endblock %}
 {% block content %}
 
 {% if not vote %}
@@ -21,6 +24,27 @@
   {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
 </section>
 
+{# ---------- 최종 결정 ---------- #}
+{% if decided %}
+<section class="hk-decided">
+  <p class="hk-decided-label">✅ 여기로 결정했어요!</p>
+  <h2>{{ decided.name }}</h2>
+  <p class="hk-decided-meta">{{ decided.kind }}{% if decided.detail %} · {{ decided.detail }}{% endif %} · {{ c.region }}에서 {{ decided.distance }}m
+    {% if counts[decided.id] %}· {{ counts[decided.id]|length }}표{% endif %}</p>
+  {% if decided.address %}<p class="hk-decided-addr">{{ decided.address }}</p>{% endif %}
+  <div class="hk-decided-links">
+    {% if decided.route_url %}<a href="{{ decided.route_url }}" target="_blank" rel="noopener" class="hk-decided-go">길찾기</a>{% endif %}
+    {% if decided.url %}<a href="{{ decided.url }}" target="_blank" rel="noopener" class="hk-decided-more">상세 정보</a>{% endif %}
+  </div>
+  {% if is_owner %}
+  <form method="post" class="hk-decided-reopen">
+    <input type="hidden" name="action" value="reopen">
+    <button type="submit" class="hk-link hk-link-btn">결정 취소하고 다시 투표 받기</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
 {# ---------- 공유 ---------- #}
 <section class="hk-share {% if is_new %}is-new{% endif %}">
   {% if is_new %}<p class="hk-share-title">🎉 투표를 만들었어요! 같이 갈 사람들에게 링크를 보내 주세요.</p>
@@ -34,8 +58,10 @@
 
 {# ---------- 현재 결과 ---------- #}
 <section class="hk-ai">
-  <p class="hk-ai-label">🗳️ 어디로 갈까요?</p>
-  {% if total == 0 %}
+  <p class="hk-ai-label">🗳️ {{ "투표 결과" if decided else "어디로 갈까요?" }}</p>
+  {% if decided %}
+    <p class="hk-vote-status">투표가 마감됐어요 · 총 {{ total }}명 참여</p>
+  {% elif total == 0 %}
     <p class="hk-vote-status">아직 아무도 투표하지 않았어요. 첫 표를 던져 주세요!</p>
   {% elif leaders|length == 1 %}
     {% for o in vote.options if o.id == leaders[0] %}
@@ -59,7 +85,7 @@
       <span class="hk-rank">{{ loop.index }}</span>
       <label class="hk-vote-pick">
         <input type="radio" name="pick" value="{{ o.id }}" required
-               {% if mine and mine.pick == o.id %}checked{% endif %}>
+               {% if mine and mine.pick == o.id %}checked{% endif %} {% if decided %}disabled{% endif %}>
         <span class="hk-vote-check" aria-hidden="true"></span>
         <div class="hk-card-top">
           <h2>{{ o.name }}{% if o.id in leaders %} 👑{% endif %}</h2>
@@ -90,12 +116,32 @@
     {% endfor %}
   </ol>
 
+  {% if not decided %}
   <label class="hk-label" for="hk-voter-name">내 이름</label>
   <input type="text" class="form-control" id="hk-voter-name" name="name" maxlength="20" required
          placeholder="예: 유빈" value="{{ form_name }}" autocomplete="nickname">
   <button type="submit" class="hk-submit">{{ "표 바꾸기" if mine else "투표하기" }}</button>
   <p class="hk-submit-hint">로그인 없이 이름만 적으면 돼요. 같은 이름이나 같은 기기로 다시 투표하면 이전 표가 바뀌어요.</p>
+  {% endif %}
 </form>
+
+{# ---------- 만든 사람만: 최종 결정 ---------- #}
+{% if is_owner and not decided %}
+<form method="post" class="hk-owner">
+  <input type="hidden" name="action" value="decide">
+  <p class="hk-owner-title">👑 투표를 만든 분만 보여요</p>
+  <p class="hk-owner-desc">다 모였으면 갈 곳을 확정하세요. 확정하면 투표가 마감되고, 링크를 연 모두에게 결정한 식당과 길찾기가 보여요.</p>
+  <div class="hk-owner-row">
+    <select name="pick" class="form-select" aria-label="결정할 식당">
+      {% for o in vote.options %}
+      <option value="{{ o.id }}" {% if leaders and o.id == leaders[0] %}selected{% endif %}>
+        {{ o.name }} ({{ counts[o.id]|length }}표)</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="hk-share-btn">여기로 결정</button>
+  </div>
+</form>
+{% endif %}
 
 <a href="{{ request.path }}" class="hk-back">↻ 결과 새로고침</a>
 <a href="{{ url_for('index') }}" class="hk-back" style="margin-left: 14px;">새로 추천받기</a>
@@ -109,7 +155,8 @@
     var url = input.value;
     // 휴대폰에서는 공유창(카톡 등)을, 안 되는 브라우저에서는 링크 복사를 쓴다
     if (navigator.share) {
-      navigator.share({ title: "함끼 · 어디로 갈까요?", text: "같이 갈 식당 투표해 줘!", url: url })
+      navigator.share({ title: {{ (("함끼 · " ~ decided.name ~ "(으)로 결정!") if decided else "함끼 · 어디로 갈까요?") | tojson }},
+                        text: {{ ("여기로 정했어! 길찾기는 링크에서 확인해 줘." if decided else "같이 갈 식당 투표해 줘!") | tojson }}, url: url })
         .catch(function () {});   // 사용자가 공유창을 닫은 경우는 무시
       return;
     }

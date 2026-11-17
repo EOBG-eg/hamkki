@@ -27,6 +27,7 @@ except ImportError:
 
 import secrets
 import sys
+import threading
 import time
 from urllib.parse import quote
 
@@ -38,14 +39,20 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 load_dotenv()  # 상위 폴더(hamkki)의 .env까지 찾아서 읽는다
 
 from ai_recommend import recommend_with_ai  # noqa: E402  (.env를 먼저 읽어야 키가 잡힘)
-import vote_store  # noqa: E402
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)  # hamkki_app 의 한 단계 위 = hamkki
 
-# 수집 스크립트(hamkki/collect_restaurants.py)의 함수를 웹에서도 같이 쓴다
+# 수집 스크립트(hamkki/collect_restaurants.py)와 DB 저장소(hamkki/db.py)를 웹에서도 같이 쓴다
 sys.path.insert(0, PROJECT_DIR)
 import collect_restaurants as collector  # noqa: E402
+import db  # noqa: E402
+import vote_store  # noqa: E402  (db.py를 쓰므로 경로 추가 뒤에)
+
+if db.enabled():  # 배포 서버: 시작할 때 DB 연결을 한 번 확인해서 로그에 남긴다
+    print("[DB]", db.check()[1], flush=True)
+else:
+    print("[DB] DATABASE_URL 없음 → data/ 폴더 파일에 저장", flush=True)
 
 app = Flask(__name__)
 # Render는 앞단 서버가 https를 받고 우리 앱에는 http로 넘겨준다.
@@ -66,6 +73,15 @@ SEARCH_RADIUS_M = 1000  # 검색한 장소에서 이 거리 안의 식당만 후
 AUTO_TILE_DAILY_LIMIT = 60       # 하루에 새로 모을 수 있는 칸 수 (카카오 쿼터 보호)
 AUTO_TILES_PER_SEARCH = 9        # 검색 한 번에 새로 모을 수 있는 칸 수 (기다리는 시간 제한)
 _auto_collect_log = []           # 자동으로 칸을 모은 시각 기록
+
+# Gemini 무료 쿼터 보호: 배포 주소는 누구나 들어올 수 있어서, 한 사람이 연달아 누르거나
+# 누가 장난으로 계속 요청하면 데모데이에 AI가 멈출 수 있다. 넘으면 AI 없이 후보 목록을 보여준다.
+AI_PER_IP_LIMIT = 6              # 한 사람(IP)이 AI_PER_IP_WINDOW초 안에 쓸 수 있는 AI 추천 횟수
+AI_PER_IP_WINDOW = 600           # 10분
+AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "300"))  # 서버 전체 하루 AI 추천 횟수
+_ai_log = {}                     # IP → 최근 AI 추천 시각들
+_ai_day = []                     # 최근 24시간 AI 추천 시각 (서버 전체)
+_ai_lock = threading.Lock()
 
 # 예전 방식(장소 이름별 파일)으로 모은 데이터가 있으면 처음 한 번 칸 방식으로 옮긴다
 collector.migrate_legacy()
@@ -118,6 +134,28 @@ FOLLOWUP_MAX_LEN = 60
 # ---------------------------------------------------------------
 # 데이터 (칸 단위 저장은 collect_restaurants.py가 담당)
 # ---------------------------------------------------------------
+def ai_limit_reason(ip):
+    """AI를 써도 되면 None, 막아야 하면 화면에 보여줄 안내 문구. 통과하면 이번 요청을 기록한다.
+    (메모리에만 기록하므로 서버가 재시작하면 초기화된다)"""
+    now = time.time()
+    with _ai_lock:
+        _ai_day[:] = [t for t in _ai_day if now - t < 86400]
+        if len(_ai_day) >= AI_DAILY_LIMIT:
+            return "오늘 AI 추천 사용량이 많아서 잠시 쉬고 있어요."
+        mine = [t for t in _ai_log.get(ip, []) if now - t < AI_PER_IP_WINDOW]
+        if len(mine) >= AI_PER_IP_LIMIT:
+            wait = int((AI_PER_IP_WINDOW - (now - mine[0])) // 60) + 1
+            _ai_log[ip] = mine
+            return f"AI 추천을 짧은 시간에 많이 요청했어요. {wait}분 뒤에 다시 해 주세요."
+        mine.append(now)
+        _ai_log[ip] = mine
+        _ai_day.append(now)
+        if len(_ai_log) > 5000:  # 오래된 IP 기록 정리 (메모리가 계속 늘지 않게)
+            for k in [k for k, v in _ai_log.items() if not v or now - v[-1] > AI_PER_IP_WINDOW]:
+                del _ai_log[k]
+        return None
+
+
 def tiles_left_today():
     """최근 24시간 동안 새로 모은 칸 수를 빼고 남은 한도"""
     now = time.time()
@@ -226,18 +264,42 @@ def api_search_place():
         return jsonify([]), 502
 
 
+@app.route("/api/where")
+def api_where():
+    """'현재 위치로 찾기': 휴대폰이 알려준 좌표를 동네 이름으로 바꾼다. 좌표는 저장하지 않는다."""
+    try:
+        x, y = float(request.args.get("x", "")), float(request.args.get("y", ""))
+    except ValueError:
+        return jsonify({"error": "좌표가 이상해요."}), 400
+    if not (124 < x < 132 and 33 < y < 39):
+        return jsonify({"error": "함끼는 국내에서만 쓸 수 있어요."}), 400
+    try:
+        region = collector.region_name_at(x, y)
+    except Exception as e:  # 이름을 못 찾아도 좌표로는 찾을 수 있으니 실패로 치지 않는다
+        print(f"[현재 위치 이름 오류] {type(e).__name__}: {e}")
+        region = ""
+    return jsonify({"name": f"현재 위치 · {region}" if region else "현재 위치"})
+
+
 def resolve_place(form):
     """
     폼에서 검색한 장소를 좌표로 바꾼다.
     자동완성에서 골랐으면 그 좌표를, 이름만 입력했으면 카카오 검색 1순위를 쓴다.
     """
     name = form.get("place_name", "").strip()[:40]
+    gps = form.get("place_source") == "gps"
     try:
         x, y = float(form.get("place_x", "")), float(form.get("place_y", ""))
         if name and 124 < x < 132 and 33 < y < 39:   # 한국 범위 안인지 확인
-            return {"name": name, "x": x, "y": y}
+            if gps:
+                # 현재 위치는 약 100m 단위로 흐리게 한다. 투표 링크 지도에 정확한 위치가 나가지 않게.
+                # (반경 1km 검색이라 결과에는 거의 차이가 없다)
+                x, y = round(x, 3), round(y, 3)
+            return {"name": name, "x": x, "y": y, "gps": gps}
     except ValueError:
         pass
+    if gps:  # 좌표가 이상하면 이름('현재 위치 · ○○동')으로 검색하지 않는다
+        return None
 
     query = form.get("place_query", "").strip()[:40] or name
     if not query:
@@ -305,7 +367,8 @@ def recommend():
             except Exception as e:
                 print(f"[자동 수집 오류] {e}")
                 collect_note = "이 지역 식당 정보를 새로 모으지 못했어요. 이미 모아둔 식당 안에서 찾았어요."
-    collector.remember_place(place["name"], place["x"], place["y"])
+    if not place.get("gps"):  # 현재 위치는 '바로 찾기' 목록에 남기지 않는다 (개인 위치라서)
+        collector.remember_place(place["name"], place["x"], place["y"])
     nearby = collector.places_near(place["x"], place["y"], SEARCH_RADIUS_M)
 
     candidates = find_candidates(nearby, situation, conditions["kind"])
@@ -322,7 +385,11 @@ def recommend():
     # 재추천이면 이미 보여준 곳은 AI 후보에서 아예 뺀다 (프롬프트로만 막으면 AI가 어길 수 있음)
     fresh = [r for r in candidates if r["id"] not in seen_ids]
     ai_candidates = fresh if len(fresh) >= 3 else candidates
-    ai_result, ai_error = recommend_with_ai(conditions, ai_candidates) if candidates else (None, None)
+    ai_result, ai_error = None, None
+    if candidates:
+        ai_error = ai_limit_reason(request.remote_addr or "?")  # ProxyFix 덕분에 실제 접속자 IP
+        if not ai_error:
+            ai_result, ai_error = recommend_with_ai(conditions, ai_candidates)
 
     # 지도: AI가 성공하면 추천 3곳, 실패하면 후보 목록을 찍는다
     shown = ai_result["picks"] if ai_result else candidates
@@ -382,8 +449,19 @@ def vote_create():
     except BadSignature:
         return render_template("vote.html", vote=None,
                                error="추천 결과가 만료됐어요. 다시 추천을 받은 뒤 투표를 만들어 주세요."), 400
-    vote_id = vote_store.create_vote(data["c"], data["summary"], data["center"], data["options"])
-    return redirect(url_for("vote_page", vote_id=vote_id, new=1))
+    voter = _voter_token()
+    vote_id = vote_store.create_vote(data["c"], data["summary"], data["center"], data["options"], owner=voter)
+    resp = redirect(url_for("vote_page", vote_id=vote_id, new=1))
+    _set_voter_cookie(resp, voter)  # 만든 사람 브라우저를 기억 → 이 브라우저에서만 '최종 결정' 버튼이 보임
+    return resp
+
+
+def _voter_token():
+    """브라우저 표시(쿠키). 없거나 모양이 이상하면 새로 만든다."""
+    voter = request.cookies.get(VOTER_COOKIE, "")
+    if 16 <= len(voter) <= 64 and voter.replace("-", "").replace("_", "").isalnum():
+        return voter
+    return secrets.token_urlsafe(16)
 
 
 @app.route("/vote/<vote_id>", methods=["GET", "POST"])
@@ -392,23 +470,32 @@ def vote_page(vote_id):
     if not vote:
         return render_template("vote.html", vote=None, error="투표를 찾을 수 없어요. 링크를 다시 확인해 주세요."), 404
 
-    voter = request.cookies.get(VOTER_COOKIE, "")
-    if not (16 <= len(voter) <= 64 and voter.replace("-", "").replace("_", "").isalnum()):
-        voter = secrets.token_urlsafe(16)   # 처음 온 브라우저에는 새 표시를 준다
+    voter = _voter_token()
 
     error = None
     if request.method == "POST":
-        ok, error = vote_store.cast_vote(vote_id, voter, request.form.get("name", ""),
-                                         request.form.get("pick", ""))
+        action = request.form.get("action", "vote")
+        if action == "decide":      # 만든 사람: 최종 결정
+            ok, error = vote_store.decide(vote_id, voter, request.form.get("pick", ""))
+            done = {}
+        elif action == "reopen":    # 만든 사람: 결정 취소, 다시 투표
+            ok, error = vote_store.decide(vote_id, voter, None)
+            done = {}
+        else:
+            ok, error = vote_store.cast_vote(vote_id, voter, request.form.get("name", ""),
+                                             request.form.get("pick", ""))
+            done = {"voted": 1}
         if ok:
             # 새로고침해도 다시 제출되지 않게 GET으로 보낸다
-            resp = redirect(url_for("vote_page", vote_id=vote_id, voted=1))
+            resp = redirect(url_for("vote_page", vote_id=vote_id, **done))
             _set_voter_cookie(resp, voter)
             return resp
         vote = vote_store.load_vote(vote_id)
 
     counts, leaders = vote_store.tally(vote)
     mine = vote["votes"].get(voter)
+    decided = vote.get("decided")
+    decided_option = next((o for o in vote["options"] if decided and o["id"] == decided["pick"]), None)
     resp = app.make_response(render_template(
         "vote.html",
         vote=vote,
@@ -417,6 +504,8 @@ def vote_page(vote_id):
         leaders=leaders,
         total=len(vote["votes"]),
         mine=mine,
+        decided=decided_option,
+        is_owner=bool(vote.get("owner")) and vote.get("owner") == voter,
         error=error,
         form_name=request.form.get("name", "") if error else (mine["name"] if mine else ""),
         is_new=request.args.get("new") == "1",
@@ -427,6 +516,14 @@ def vote_page(vote_id):
     ))
     _set_voter_cookie(resp, voter)
     return resp
+
+
+@app.errorhandler(db.DBError)
+def db_error(e):
+    """DB가 잠깐 안 될 때 오류 페이지 대신 안내를 보여준다. (식당 추천은 파일로 대신해서 계속 됨)"""
+    print(f"[DB 오류] {e}", flush=True)
+    return render_template("vote.html", vote=None,
+                           error="투표 저장소에 잠깐 연결하지 못했어요. 잠시 후 새로고침해 주세요."), 503
 
 
 def _set_voter_cookie(resp, voter):

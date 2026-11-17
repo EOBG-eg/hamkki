@@ -21,6 +21,12 @@
     <input type="hidden" name="place_name" id="place_name">
     <input type="hidden" name="place_x" id="place_x">
     <input type="hidden" name="place_y" id="place_y">
+    <input type="hidden" name="place_source" id="place_source">
+
+    <div class="hk-locate">
+      <button type="button" class="hk-locate-btn" id="hk-locate-btn">🎯 현재 위치로 찾기</button>
+      <span class="hk-locate-msg" id="hk-locate-msg" role="status"></span>
+    </div>
 
     {% if quick %}
     <div class="hk-quick">
@@ -108,7 +114,8 @@
   let timer = null;
   let lastQuery = "";
 
-  function clearPicked() { hidden.name.value = hidden.x.value = hidden.y.value = ""; }
+  const source = document.getElementById("place_source");
+  function clearPicked() { hidden.name.value = hidden.x.value = hidden.y.value = source.value = ""; }
 
   function closeList() {
     list.hidden = true;
@@ -165,6 +172,56 @@
       closeList();
     });
   });
+
+  // ---------- 현재 위치로 찾기 ----------
+  // 휴대폰 위치(GPS) → 서버가 카카오로 동네 이름만 알려준다. 위치는 저장하지 않는다.
+  // 위치 권한은 https 주소(또는 localhost)에서만 물어볼 수 있다.
+  const locBtn = document.getElementById("hk-locate-btn");
+  const locMsg = document.getElementById("hk-locate-msg");
+  function locDone(text) {
+    locBtn.disabled = false;
+    locBtn.textContent = "🎯 현재 위치로 찾기";
+    locMsg.textContent = text || "";
+  }
+  locBtn.addEventListener("click", () => {
+    if (!navigator.geolocation) { locDone("이 브라우저는 위치 찾기를 지원하지 않아요."); return; }
+    locBtn.disabled = true;
+    locBtn.textContent = "위치 확인 중…";
+    locMsg.textContent = "";
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const x = pos.coords.longitude.toFixed(6), y = pos.coords.latitude.toFixed(6);
+      let name = "현재 위치";
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 8000);   // 동네 이름은 8초 안에 못 받으면 생략
+        const res = await fetch(`/api/where?x=${x}&y=${y}`, { signal: ctrl.signal });
+        clearTimeout(t);
+        const data = await res.json();
+        if (!res.ok) { locDone(data.error || "위치를 확인하지 못했어요."); return; }
+        name = data.name;
+      } catch (e) { /* 이름 없이 좌표로만 찾는다 */ }
+      input.value = name;
+      hidden.name.value = name;
+      hidden.x.value = x;
+      hidden.y.value = y;
+      source.value = "gps";
+      closeList();
+      locDone("지금 있는 곳 근처에서 찾을게요.");
+    }, (err) => {
+      locDone(err.code === 1
+        ? "위치 권한이 꺼져 있어요. 브라우저 설정에서 허용하거나 장소 이름을 입력해 주세요."
+        : "위치를 찾지 못했어요. 장소 이름을 입력해 주세요.");
+    }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+  });
+
+  // ---------- 시간대 자동 선택 ----------
+  // 휴대폰의 지금 시각으로 미리 골라 둔다 (서버는 해외 시간이라 화면에서 정한다). 직접 바꾸면 그대로 쓴다.
+  (function () {
+    const sel = document.getElementById("time_slot");
+    const h = new Date().getHours();
+    const slot = h >= 5 && h < 15 ? "점심" : h >= 15 && h < 22 ? "저녁" : "늦은 밤";
+    if ([...sel.options].some((o) => o.value === slot)) sel.value = slot;
+  })();
 
   // 제출하면 버튼을 잠그고 기다리는 안내를 보여준다
   document.getElementById("hk-form").addEventListener("submit", () => {

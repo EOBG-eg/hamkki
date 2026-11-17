@@ -81,6 +81,7 @@
     <input type="hidden" name="place_name" value="{{ place.name }}">
     <input type="hidden" name="place_x" value="{{ place.x }}">
     <input type="hidden" name="place_y" value="{{ place.y }}">
+    {% if place.gps %}<input type="hidden" name="place_source" value="gps">{% endif %}
     <input type="hidden" name="situation" value="{{ c.situation }}">
     <input type="hidden" name="people" value="{{ c.people }}">
     <input type="hidden" name="time_slot" value="{{ c.time_slot }}">

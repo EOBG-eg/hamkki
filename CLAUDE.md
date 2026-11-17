@@ -1,6 +1,6 @@
 # 함끼(Hamkki) — Claude Code 작업 안내
 
-소프트웨어학과 2221042 이유빈의 3회차 과제 프로젝트. 상황과 조건을 입력하면 AI가 근처 식당 3곳을 이유와 함께 추천하고, (예정) 동행자와 투표로 정하는 모바일 반응형 웹서비스.
+소프트웨어학과 2221042 이유빈의 3회차 과제 프로젝트. 상황과 조건을 입력하면 AI가 근처 식당 3곳을 이유와 함께 추천하고, 동행자와 링크 투표로 정하는 모바일 반응형 웹서비스.
 슬로건: "AI가 고르고, 함께 정하는 한 끼" / Pick together, eat together.
 
 ## 대화 방식
@@ -25,6 +25,7 @@
 hamkki/                       ← 이 폴더에서 Claude Code를 연다
 ├── .env                      ← API 키 (절대 커밋·출력 금지)
 ├── collect_restaurants.py    ← 식당 수집 (명령줄 + app.py가 import해서 사용)
+├── db.py                     ← Postgres 저장소 (DATABASE_URL 있을 때만. 투표·실행 중 수집 칸·검색 장소)
 ├── render.yaml               ← Render 배포 설정 (Blueprint)
 ├── .python-version           ← Render 파이썬 버전
 ├── data/                     ← 수집 데이터 (.gitignore, GitHub에 없음)
@@ -36,8 +37,8 @@ hamkki/                       ← 이 폴더에서 Claude Code를 연다
 └── hamkki_app/
     ├── app.py                ← Flask 서버 (실행 파일)
     ├── ai_recommend.py       ← Gemini 추천
-    ├── vote_store.py         ← 투표 저장 (배포 때 이 파일만 Postgres로 교체)
-    ├── requirements.txt      ← flask, requests, python-dotenv, google-genai, truststore, gunicorn
+    ├── vote_store.py         ← 투표 저장 (DATABASE_URL 있으면 Postgres, 없으면 data/votes 파일)
+    ├── requirements.txt      ← flask, requests, python-dotenv, google-genai, truststore, gunicorn, pg8000
     ├── templates/            ← base.html, index.html(입력), results.html(결과), vote.html(투표), _map.html(지도)
     └── static/style.css
 ```
@@ -67,6 +68,12 @@ python app.py                → http://localhost:5000
 6. 재추천: 결과 화면에서 "더 저렴한 곳으로" 등 조건을 덧붙이면(최대 3번) 처음 조건 + 덧붙인 요청 + 지금까지 보여준 식당(`seen`)을 AI에 넘겨 다시 고름. 보여준 식당은 서버가 AI 후보에서 제외
 7. '친구들과 투표로 정하기' → `/vote/create`(추천 내용은 `SECRET_KEY`로 서명해 위조 방지) → `/vote/<id>` 공유 링크. 로그인 없이 이름+투표, 브라우저 쿠키(`hk_voter`)나 같은 이름이면 이전 표를 교체
 
+8. 투표를 만든 브라우저(`owner` = `hk_voter` 쿠키)만 '여기로 결정' → `decided` 저장, 투표 마감, 모두에게 결정 식당·길찾기 배너. 결정 취소(reopen) 가능
+9. Gemini 쿼터 보호(`ai_limit_reason`): IP당 10분 6회, 서버 전체 하루 `AI_DAILY_LIMIT`(기본 300). 넘으면 AI 없이 후보 목록. 메모리 기록이라 재시작 시 초기화
+10. 카톡 공유 미리보기: base.html Open Graph 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
+11. 현재 위치로 찾기: 브라우저 GPS → `/api/where`(카카오 coord2regioncode, 법정동 이름) → '현재 위치 · ○○동'. `place_source=gps`면 좌표를 소수 셋째 자리(약 100m)로 흐리고 '바로 찾기'(places.json)에 기록 안 함. https/localhost에서만 동작
+12. 시간대: 첫 화면 JS가 휴대폰 시각으로 미리 선택 (5~15시 점심, 15~22시 저녁, 그 외 늦은 밤). 서버(Render)는 UTC라 서버에서 정하면 틀림
+
 수집 세부:
 - 칸은 동시에 4개씩 수집 (`COLLECT_WORKERS`, 의정부역 1km 빈 상태 기준 50초 → 19초)
 - 카카오 카테고리 검색(FD6)은 한 번에 최대 45곳 → 넘치면 구역을 4칸으로 재귀 분할 (최소 0.0005도)
@@ -78,6 +85,13 @@ AI 세부 (`ai_recommend.py`):
 - 패키지는 `google-genai` (안내문의 `google-generativeai`는 예전 패키지)
 - 모델 순서: `.env`의 `GEMINI_MODEL` → `gemini-3.5-flash-lite` → `gemini-3.8-flash` → `gemini-3.6-flash` (2.5 Flash는 신규 계정 사용 불가)
 - 모델당 20초, 전체 40초 제한. `HAMKKI_DEBUG=1`(기본)이면 실패 원인을 화면에 표시, 배포 시 0
+
+저장소 (`db.py`):
+- `DATABASE_URL`이 있으면 Postgres(Render 무료 `hamkki-db`, render.yaml `databases:`), 없으면 파일. 코드는 어느 쪽이든 같음
+- 칸: 빌드 때 모은 칸은 이미지 안 파일, 실행 중 모은 칸은 DB. 읽을 때 합치고 DB 우선. DB 장애 시 칸은 파일로 대신, 투표는 503 안내
+- 빌드 수집은 `DATABASE_URL=`로 비워서 파일에 저장 (이미지 포함)
+- 드라이버는 pg8000(순수 파이썬). psycopg는 학교 PC 응용 프로그램 제어 정책이 DLL을 막음
+- 무료 DB는 생성 30일 뒤 만료 → 학기 후에도 쓰려면 Neon 등으로 `DATABASE_URL`만 교체
 
 ## 꼭 지킬 것
 
@@ -92,14 +106,17 @@ AI 세부 (`ai_recommend.py`):
 
 ## 진행 현황 (2026-11-10 기준)
 
-완료: 카카오 자동 수집(격자 칸), 장소 검색·자동완성·자동 수집, 조건 입력 화면, Gemini AI 추천 + 안전장치, 결과 화면 카카오 지도(번호 핀·카드 연동·https 상세/길찾기 링크, `templates/_map.html`), 공유 링크 + 동행자 투표, 조건 덧붙여 재추천, 배포 설정 파일(render.yaml), README, 검증 기록 초안(`docs/검증기록_초안.md`), data 백업(`Documents\hamkki_data_backup_20261110.zip`)
-데이터: 의정부역·홍대입구역·강남역 일대 약 6,300곳 + 상우고등학교 주변
+완료: 카카오 자동 수집(격자 칸), 장소 검색·자동완성·자동 수집, 조건 입력 화면, Gemini AI 추천 + 안전장치, 결과 화면 카카오 지도(번호 핀·카드 연동·https 상세/길찾기 링크, `templates/_map.html`), 공유 링크 + 동행자 투표, 조건 덧붙여 재추천, 배포 설정 파일(render.yaml), README, 검증 기록 초안(`docs/검증기록_초안.md`), data 백업(`Documents\hamkki_data_backup_20261110.zip`), **Render 배포 완료**(빌드 때 의정부시 수집, 칸 4개 동시 수집), 휴대폰 동작 확인(11/10)
+데이터(로컬): 칸 173개, 식당 8,756곳 = 의정부시 전체(사각형 범위 4,127곳) + 홍대입구역·강남역 일대 + 상우고 주변. 배포 서버에는 의정부시만 미리 수집됨
 
 다음 할 일 (우선순위 순):
-1. 식당 분위기 AI 태깅 (정해진 태그 목록 안에서만, 근거 없으면 "정보 없음"), 이후 방문자 태그로 보정
-2. Postgres 이전 (**투표만**): 식당 데이터는 빌드 때 수집으로 해결. 실행 중 만든 파일(투표, 검색 때 자동 수집한 칸)은 재시작·잠듦(15분 무접속) 때 사라진다. 무료 Postgres는 30일 만료라 **12주차(11/16~22)에 생성**해야 15주차(12/7~13)까지 유지됨. `vote_store.py`만 교체
+1. 보고서 작성: 사용자가 claude.ai(다른 창)에서 진행 중이던 양식·요구사항을 가져오면 이어서 작성. 자료는 README, `docs/검증기록_초안.md`
+2. Postgres 이전 — **코드 완료(11/17), render.yaml만 Push 보류**: 투표 + 실행 중 모은 칸 + 검색 장소를 DB에 저장(`db.py`). DATABASE_URL이 없으면 파일 저장이라 render.yaml 외 파일은 먼저 Push해도 안전. render.yaml을 Push하는 순간 무료 DB가 생성되고 30일 뒤 만료되므로 **render.yaml은 11/24(화)에 Push하기로 사용자와 확정**(→ 12/24쯤 만료). 그 전까지 다른 커밋에서 render.yaml 체크 해제 상기시킬 것. 확인: Blueprint에서 hamkki-db 생성, Logs에 `[DB] Postgres 연결됨`, 투표 만들고 15분 잠든 뒤에도 남는지
+3. 식당 분위기 AI 태깅 (선택, 13주차 여유 있을 때만): 정해진 태그 목록 안에서만, 근거 없으면 "정보 없음", 이후 방문자 태그로 보정
 
-일정: 11주차 재추천·1차 배포(완료, Postgres 없이) → 12주차 Postgres → 13주차 실사용 시험(태깅은 여유 있을 때만) → 14주차 데모데이(새 기능 금지, 리허설, 쿼터 확인) → 15주차 발표·검증 기록·README
+사용자 할 일: 백업 zip을 구글 드라이브·USB로 옮기기, 검증 기록 초안 1~3·6·10·11번을 기억과 대조해 다듬기
+
+일정: 11주차 재추천·1차 배포(완료, Postgres 없이) → 12주차 Postgres 코드 → 13주차 11/24 Postgres(render.yaml) Push·확인, 실사용 시험(태깅은 여유 있을 때만) → 14주차 데모데이(새 기능 금지, 리허설, 쿼터 확인) → 15주차 발표·검증 기록·README
 
 지역 미리 수집 우선순위: 의정부시 전체 → 노원·도봉·수유·창동 → 서울 약속 장소(건대·성수·잠실·신촌·혜화 등) → 경기·인천 중심가 → 지방 대도시. 전국 일괄 수집은 하지 않는다(호출량·용량·약관). 나머지는 검색 시 자동 수집에 맡긴다.
 
