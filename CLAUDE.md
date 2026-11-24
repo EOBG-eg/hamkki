@@ -6,7 +6,7 @@
 ## 대화 방식
 
 - 사용자는 한국어로 대화한다. 답변, 코드 주석, 화면 문구 모두 한국어로.
-- 사용자는 코딩 초보에 가깝다. 명령어는 복사해서 바로 쓸 수 있게 주고, 어느 폴더에서 실행하는지 항상 밝힌다.
+- 명령어는 복사해서 바로 쓸 수 있게 주고, 어느 폴더에서 실행하는지 항상 밝힌다.
 - 사용자는 "일일이 고치게 하지 말고 코드를 직접 업데이트해 달라"고 했다. 수정은 직접 하되, 무엇을 왜 바꿨는지 짧게 설명한다.
 - 과제 규칙상 AI 코드를 그대로 내면 안 되고 "AI 초안 vs 본인 수정" 검증 기록을 제출해야 한다. 의미 있는 수정은 무엇이 문제였고 어떻게 고쳤는지 한두 줄로 남겨 사용자가 기록에 옮길 수 있게 한다.
 - 커밋·Push는 사용자가 요청할 때만 한다(사용자가 "올려줘/적용시켜줘"라고 하면 Claude가 커밋·Push, 아니면 한국어 한 줄 커밋 메시지만 제안).
@@ -55,8 +55,8 @@ hamkki/                       ← 이 폴더에서 Claude Code를 연다
 Windows 명령 프롬프트 기준 (실습실 PC 경로):
 
 ```
-C:\Users\1809-30\venv\Scripts\activate
-cd C:\Users\1809-30\Documents\GitHub\hamkki\hamkki_app
+%USERPROFILE%\venv\Scripts\activate
+cd %USERPROFILE%\Documents\GitHub\hamkki\hamkki_app
 python app.py                → http://localhost:5000
 ```
 
@@ -67,7 +67,7 @@ python app.py                → http://localhost:5000
 
 ### 다른 PC(집)에서 이어서 할 때
 - 코드: GitHub Desktop → Clone `EOBG-eg/hamkki`. 이 파일(CLAUDE.md)에 맥락이 다 있으므로 Claude Code로 이 폴더를 열면 이어서 할 수 있다 (이 대화 기록 자체는 학교 PC에만 있음)
-- 위 실행 경로(`C:\Users\1809-30\venv`)는 학교 실습실 PC 기준. 다른 PC는 hamkki 폴더에서 `python -m venv venv` → `venv\Scripts\activate` → `python -m pip install -r hamkki_app/requirements.txt`
+- 위 실행 경로(사용자 폴더의 `venv`)는 학교 실습실 PC 기준. 다른 PC는 hamkki 폴더에서 `python -m venv venv` → `venv\Scripts\activate` → `python -m pip install -r hamkki_app/requirements.txt`
 - `.env`(API 키)와 `data/`는 GitHub에 없다. 로컬 실행에만 필요하고, 코드를 고쳐 Push만 할 거면 없어도 된다(배포 서버엔 키가 Render 환경변수로 있음). 옮길 때는 USB 등으로 직접, 채팅·공개 장소에 붙이지 않기
 - `data/` 복구: 백업 `Documents\hamkki_data_backup_20261110.zip`(학교 PC) 또는 `python collect_restaurants.py --area 의정부시`로 다시 수집
 - 학교 PC 전용 사정: HTTPS 검사망(truststore 필요), 응용 프로그램 제어 정책(psycopg DLL 차단 → pg8000), Edge 헤드리스로 화면 캡처 가능
@@ -139,7 +139,7 @@ AI 세부 (`ai_recommend.py`):
   - 데모데이 시연 대본(3분 대본·준비 체크리스트·예상 질문·직접 찾고 고친 것·문제 대처): https://claude.ai/artifact/LKShfWPgwFN1LpsE3TMeJP
   - 포트폴리오 카드 1·2·3회차(1회차 AI 도구=Gemini, 2·3회차=Claude): https://claude.ai/artifact/JDirBBNGGpnyTtGrqDxWPo
 - 저장소 문서: `docs/검증기록.md`(전체 37건), `docs/AI기능설명.md`, README
-- **제출 파일**: 학교 PC `C:\Users\1809-30\Documents\2221042_이유빈_3회차.zip` (00_설명서.txt, 01_결과보고서.docx, 02_AI기능설명.md, 03_검증기록_전체.md, 04_포트폴리오카드.docx, 05_소스코드/). 시연 대본은 제출물에서 뺌(발표는 시연으로). 문서를 고치면 claude.ai 문서를 docx로 내보내 zip을 다시 만들어야 함
+- **제출 파일**: 학교 PC 문서 폴더의 `2221042_이유빈_3회차.zip` (00_설명서.txt, 01_결과보고서.docx, 02_AI기능설명.md, 03_검증기록_전체.md, 04_포트폴리오카드.docx, 05_소스코드/). 시연 대본은 제출물에서 뺌(발표는 시연으로). 문서를 고치면 claude.ai 문서를 docx로 내보내 zip을 다시 만들어야 함
 
 데이터(로컬): 칸 173개, 식당 8,756곳(의정부시 전체 + 홍대·강남·상우고 주변). 배포 서버는 빌드 때 의정부시를 미리 수집 + 실행 중 모은 칸은 Postgres
 
@@ -149,7 +149,7 @@ AI 세부 (`ai_recommend.py`):
 3. 14주차부터 새 기능 넣지 않기 (발표 직전 위험). 버그만 고침
 4. 선택: 실사용 통계(과제 요구사항 아님), 학기 후 서비스 유지 시 Postgres를 Neon 등 만료 없는 DB로(`DATABASE_URL`만 교체)
 
-평가(이번 발표 40점) 대비 메모: 문제 정의·AI 타당성·구현 완성도는 강점. 위험은 시연 중 오류와 'AI 코드를 그대로 냈다'는 인상 → 직접 찾은 문제 사례(초밥 0→14곳, 제주도, 투표 자동 마감)로 답하기
+발표 질의응답 대비: AI 검증 과정은 직접 써 보고 찾아 고친 사례(초밥 후보 0→14곳, 제주도 검색, 투표 자동 마감)로 설명한다 (시연 대본의 '직접 찾고 고친 것')
 
 지역 미리 수집 우선순위: 의정부시 전체 → 노원·도봉·수유·창동 → 서울 약속 장소(건대·성수·잠실·신촌·혜화 등) → 경기·인천 중심가 → 지방 대도시. 전국 일괄 수집은 하지 않는다(호출량·용량·약관). 나머지는 검색 시 자동 수집에 맡긴다.
 
