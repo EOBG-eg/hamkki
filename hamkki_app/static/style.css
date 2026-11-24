@@ -806,3 +806,7 @@ body {
 .hk-broad-hubs .hk-ic { color: var(--hk-accent); width: 15px; height: 15px; }
 .hk-moved { display: flex; gap: 6px; align-items: flex-start; }
 .hk-moved .hk-ic { flex: none; margin-top: 1px; }
+
+/* 결과 화면: 문장에서 찾은 음식 */
+.hk-food-note { font-size: .8rem; color: var(--hk-muted); margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.hk-food-note b { color: var(--hk-accent); font-weight: 700; }

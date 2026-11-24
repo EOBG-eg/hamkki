@@ -39,6 +39,7 @@ SYSTEM_INSTRUCTION = f"""너는 '함끼'라는 식당 추천 서비스의 추천
 3. 후보 정보는 이름, 종류, 세부 종류, 지역 중심까지 거리뿐이다. 이 정보로 알 수 없는 것
    (실제 분위기, 영업시간, 가격, 좌석)을 사실처럼 단정하지 않는다.
    추정할 때는 "~일 가능성이 높아요", "~하기 좋은 메뉴예요"처럼 표현한다.
+   후보의 이름·종류로 확인되지 않는 메뉴를 그 식당이 판다고 말하지 않는다.
 4. reason은 이 상황의 사용자에게 건네는 친근한 존댓말 한두 문장으로 쓴다. 60자 안팎.
 5. [추가 요청]이 있으면 사용자가 앞선 추천을 보고 덧붙인 조건이다. 마지막 요청을 가장 중요하게 반영하고,
    앞의 요청과 원래 조건도 계속 지킨다. [직전 추천]과 [그 전에 보여준 곳]에 있는 식당은 다시 고르지 않는다.
@@ -46,8 +47,11 @@ SYSTEM_INSTRUCTION = f"""너는 '함끼'라는 식당 추천 서비스의 추천
    이때 summary에는 이번 요청을 어떻게 반영했는지 그 요청에 맞는 말로 한 문장 쓴다.
    (예시 문장을 그대로 따라 쓰지 말 것. 어떤 메뉴·특징 쪽으로 바꿨는지 구체적으로)
    가격 정보는 없으므로 "저렴한" 요청은 메뉴 종류로 추정하고 단정하지 않는다.
-6. 투자, 건강 같은 조언은 하지 않는다.
-7. 출력은 JSON만 쓴다.
+6. [요청 음식 해석]이 있으면 사용자가 먹고 싶다고 한 음식이다. 후보 중 ★ 표시가 그 음식을 파는 곳이니 ★ 중에서 우선 고른다.
+   "근처에 해당 식당이 없다"고 되어 있으면 억지로 맞다고 하지 말고, summary에
+   "근처 1km 안에는 ○○집이 없어서 ~ 위주로 골랐어요"처럼 솔직하게 쓴다.
+7. 투자, 건강 같은 조언은 하지 않는다.
+8. 출력은 JSON만 쓴다.
 
 출력 형식:
 {{"summary": "추천 전체를 한 문장으로", "picks": [{{"id": "후보 id", "reason": "추천 이유"}}]}}
@@ -83,12 +87,20 @@ def _build_prompt(conditions, candidates):
     lines = []
     for c in candidates:
         detail = f"/{c['detail']}" if c["detail"] else ""
-        lines.append(f"- id={c['id']} | {c['name']} | {c['kind']}{detail} | 중심에서 {c['distance']}m")
+        star = "★ " if c.get("wanted") else ""
+        lines.append(f"- {star}id={c['id']} | {c['name']} | {c['kind']}{detail} | 중심에서 {c['distance']}m")
 
     wish = conditions["wish"] or "(없음)"
     extra = ""
     if conditions.get("followups"):
         extra += "\n[추가 요청] (아래로 갈수록 최근)\n" + "\n".join(f"- {t}" for t in conditions["followups"]) + "\n"
+    food = conditions.get("food")
+    if food and food.get("labels"):
+        labels = ", ".join(food["labels"])
+        if food.get("found"):
+            extra += f"\n[요청 음식 해석] {labels} → 후보 중 {food['found']}곳이 해당 (★ 표시)\n"
+        else:
+            extra += f"\n[요청 음식 해석] {labels} → 반경 1km 안에 해당 식당이 없다\n"
     if conditions.get("previous"):
         extra += "\n[직전 추천]\n" + "\n".join(f"- {n}" for n in conditions["previous"]) + "\n"
     if conditions.get("earlier"):
@@ -99,30 +111,23 @@ def _build_prompt(conditions, candidates):
 인원: {conditions['people']}명
 시간대: {conditions['time_slot'] or '상관없음'}
 1인 예산: {conditions['budget'] or '상관없음'}
-원하는 음식 종류: {conditions['kind'] or '상관없음'}
-분위기 요청: {wish}
+원하는 음식 종류(선택 칸): {conditions['kind'] or '상관없음'}
+그 밖에 원하는 것(자유 문장): {wish}
 {extra}
 [후보 목록 {len(candidates)}곳]
 {chr(10).join(lines)}
 """
 
 
-def recommend_with_ai(conditions, candidates):
-    """
-    성공하면 {"summary": str, "picks": [후보 dict + "reason"]} 를 돌려준다.
-    실패하면 (None, 실패 이유) 를 돌려준다.
-    """
+def _client():
+    """Gemini 클라이언트. (client, types, None) 또는 실패하면 (None, None, 이유)"""
     if not GEMINI_API_KEY:
-        return None, "GEMINI_API_KEY가 .env에 없어요."
-    if len(candidates) < PICK_COUNT:
-        return None, "후보가 너무 적어요."
-
+        return None, None, "GEMINI_API_KEY가 .env에 없어요."
     try:
         from google import genai
         from google.genai import types
     except ImportError:
-        return None, "google-genai 패키지가 설치되지 않았어요. (pip install -U google-genai)"
-
+        return None, None, "google-genai 패키지가 설치되지 않았어요. (pip install -U google-genai)"
     ssl_context = _make_ssl_context()
     try:
         client = genai.Client(
@@ -137,29 +142,117 @@ def recommend_with_ai(conditions, candidates):
         print(f"[AI] 인증서 설정을 적용하지 못해 기본 연결을 씁니다: {e}")
         client = genai.Client(api_key=GEMINI_API_KEY,
                               http_options=types.HttpOptions(timeout=AI_TIMEOUT_MS))
-    prompt = _build_prompt(conditions, candidates)
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_INSTRUCTION,
-        response_mime_type="application/json",
-        temperature=0.7,
-    )
+    return client, types, None
 
+
+def _ask_json(client, types, system, prompt, time_budget, temperature, what):
+    """모델을 차례로 시도해 JSON 응답을 받는다. (data 또는 None, 오류 목록)"""
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        response_mime_type="application/json",
+        temperature=temperature,
+    )
     data, errors = None, []
     started = time.time()
     for model in GEMINI_MODELS:  # 모델 하나가 안 되면 다음 모델로
-        if time.time() - started > 40:  # 전체로도 40초를 넘기지 않는다
+        if time.time() - started > time_budget:  # 전체 시간도 제한한다
             errors.append("시간 초과로 나머지 모델은 건너뜀")
             break
         try:
             response = client.models.generate_content(model=model, contents=prompt, config=config)
             data = json.loads(response.text)
-            print(f"[AI] 모델 {model} 로 추천 성공")
+            print(f"[AI] 모델 {model} 로 {what} 성공")
             break
         except json.JSONDecodeError:
             errors.append(f"{model}: 응답이 JSON이 아님")
         except Exception as e:  # 네트워크 오류, 쿼터 초과(429), 없는 모델 이름(404) 등
             errors.append(f"{model}: {type(e).__name__}: {str(e)[:200]}")
-        print(f"[AI 오류] {errors[-1]}")
+        print(f"[AI 오류] {what}: {errors[-1]}")
+    return data, errors
+
+
+# ---------------------------------------------------------------
+# 1단계: 자유 문장 → 음식 종류 (후보를 고르기 전에)
+# ---------------------------------------------------------------
+# 예전에는 서버가 상황·거리만으로 후보 20곳을 골라서, "초밥 먹고 싶어"라고 적어도
+# 근처 초밥집 14곳이 후보에 하나도 안 들어갔다 → AI가 초밥집 없는 목록에서 억지로 골랐다.
+INTERPRET_INSTRUCTION = """너는 식당 추천 서비스에서 사용자가 적은 문장을 '음식 종류'로 바꾸는 역할이야.
+[메뉴판]은 사용자 근처 식당들의 실제 세부 종류 목록이다.
+
+규칙:
+1. categories: 사용자가 먹고 싶다고 한 음식에 맞는 종류를 [메뉴판]에 적힌 이름 그대로 최대 6개 고른다.
+   메뉴판에 없는 이름은 절대 쓰지 않는다. "얼큰한 국물"처럼 음식 성격만 말해도 맞는 종류를 고른다.
+2. keywords: 사용자가 말한 구체적인 음식 이름(예: 마라탕, 쌀국수, 떡볶이)을 최대 3개. 식당 이름에서 찾는 데 쓴다.
+   음식 이름이 아닌 말(조용한, 데이트, 가성비)은 넣지 않는다.
+3. avoid: "고기 말고", "술집 빼고"처럼 피하고 싶다고 한 종류를 [메뉴판] 이름 그대로.
+4. 문장이 분위기·상황만 말하고 음식을 정하지 않았다면(예: 조용한 곳, 오래 얘기할 곳) categories와 keywords는 빈 목록이다.
+5. 문장이 여러 개면 아래쪽(최근) 문장을 더 우선한다.
+6. 출력은 JSON만: {"categories": [...], "keywords": [...], "avoid": [...]}
+"""
+_interp_cache = {}   # 같은 문장·같은 메뉴판이면 다시 묻지 않는다 (재추천·새로고침 때 호출 절약)
+
+
+def interpret_request(texts, menu):
+    """
+    texts: 사용자가 적은 문장들 (처음 문장 + 덧붙인 요청, 오래된 것 → 최신)
+    menu: 근처 식당의 세부 종류 이름 목록
+    돌려주는 값: {"categories": [...], "keywords": [...], "avoid": [...]} (메뉴판 밖 이름은 서버가 뺀다)
+                 AI를 못 쓰면 None
+    """
+    texts = [t for t in texts if t]
+    if not texts or not menu:
+        return None
+    menu = sorted(set(menu))
+    key = ("\n".join(texts), hash(tuple(menu)))
+    if key in _interp_cache:
+        print("[AI] 문장 해석: 저장해 둔 결과 사용")
+        return _interp_cache[key]
+    client, types, err = _client()
+    if err:
+        print(f"[AI] 문장 해석 생략: {err}")
+        return None
+    prompt = ("[메뉴판]\n" + ", ".join(menu) + "\n\n[사용자 문장] (아래로 갈수록 최근)\n"
+              + "\n".join(f"- {t}" for t in texts))
+    data, _ = _ask_json(client, types, INTERPRET_INSTRUCTION, prompt, time_budget=15,
+                        temperature=0.1, what="문장 해석")
+    if not isinstance(data, dict):
+        return None
+    allowed = set(menu)
+
+    def names(field, limit, must_be_on_menu):
+        """정해진 개수·모양만 받는다 (메뉴판 밖 이름은 버림)"""
+        out = []
+        for v in data.get(field) or []:
+            v = str(v).strip()
+            ok = (v in allowed) if must_be_on_menu else (2 <= len(v) <= 15)
+            if v and ok and v not in out:
+                out.append(v)
+        return out[:limit]
+
+    result = {"categories": names("categories", 6, True), "keywords": names("keywords", 3, False),
+              "avoid": names("avoid", 6, True)}
+    if len(_interp_cache) > 300:
+        _interp_cache.clear()
+    _interp_cache[key] = result
+    print(f"[AI] 문장 해석 결과: {result}")
+    return result
+
+
+# ---------------------------------------------------------------
+# 2단계: 후보 중 3곳 고르기 + 추천 이유
+# ---------------------------------------------------------------
+def recommend_with_ai(conditions, candidates):
+    """
+    성공하면 {"summary": str, "picks": [후보 dict + "reason"]} 를 돌려준다.
+    실패하면 (None, 실패 이유) 를 돌려준다.
+    """
+    if len(candidates) < PICK_COUNT:
+        return None, "후보가 너무 적어요."
+    client, types, err = _client()
+    if err:
+        return None, err
+    data, errors = _ask_json(client, types, SYSTEM_INSTRUCTION, _build_prompt(conditions, candidates),
+                             time_budget=40, temperature=0.7, what="추천")
 
     if data is None:
         if DEBUG:  # 개발 중에는 원인을 화면에도 보여준다

@@ -38,7 +38,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()  # 상위 폴더(hamkki)의 .env까지 찾아서 읽는다
 
-from ai_recommend import recommend_with_ai  # noqa: E402  (.env를 먼저 읽어야 키가 잡힘)
+from ai_recommend import interpret_request, recommend_with_ai  # noqa: E402  (.env를 먼저 읽어야 키가 잡힘)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)  # hamkki_app 의 한 단계 위 = hamkki
@@ -251,15 +251,59 @@ def map_points(items):
 # ---------------------------------------------------------------
 # 후보 고르기
 # ---------------------------------------------------------------
-def find_candidates(nearby, situation, kind_filter):
-    """근처 식당 중에서 정확한 조건(음식 종류)과 상황 규칙으로 후보를 추린다."""
+def food_menu(nearby):
+    """근처 식당의 세부 종류 목록 ('초밥,롤', '국밥' …). 세부 종류가 없으면 큰 종류('한식')"""
+    return sorted({get_detail(p) or get_kind(p) for p, _ in nearby} - {""})
+
+
+def understand_food(texts, nearby, use_ai):
+    """
+    사용자가 적은 문장(처음 문장 + 덧붙인 요청)에서 먹고 싶은 음식을 알아낸다.
+    1) Gemini가 근처 메뉴판 안에서 고른다 (같은 문장이면 저장해 둔 결과 재사용)
+    2) AI를 못 쓰면(사용 제한·오류) 메뉴판 이름이 문장에 그대로 있는지만 본다
+    음식 이야기가 없으면 None
+    """
+    texts = [t for t in texts if t]
+    if not texts or not nearby:
+        return None
+    menu = food_menu(nearby)
+    food = interpret_request(texts, menu) if use_ai else None
+    if food is None:
+        joined = " ".join(texts)
+        hits = [m for m in menu if any(len(w) >= 2 and w in joined for w in m.split(","))]
+        food = {"categories": hits[:6], "keywords": [], "avoid": []}
+    if not (food["categories"] or food["keywords"] or food["avoid"]):
+        return None
+    return food
+
+
+def find_candidates(nearby, situation, kind_filter, food=None):
+    """
+    근처 식당 중에서 정확한 조건(음식 종류)과 상황 규칙으로 후보를 추린다.
+    food(문장 해석 결과)가 있으면 그 음식을 파는 곳을 맨 앞에 넣고(wanted), 피하고 싶다는 종류는 뺀다.
+    """
     rule = SITUATIONS[situation]
+    # AI는 구체적인 종류를 먼저, 넓은 종류('중국요리')를 뒤에 적는다 → 앞에 적은 것일수록 먼저 넣는다
+    want_rank = {c: i + 1 for i, c in enumerate(food["categories"])} if food else {}
+    want = set(want_rank)
+    keywords = food["keywords"] if food else []
+    avoid = set(food["avoid"]) if food else set()
     results = []
     for p, dist in nearby:
         kind = get_kind(p)
+        leaf = get_detail(p) or kind
         if kind_filter and kind != kind_filter:        # 정확한 조건: 음식 종류
             continue
-        if not kind_filter and kind in rule["avoid"]:  # 상황에 안 맞는 종류 제외
+        if leaf in avoid or kind in avoid:             # "고기 말고" 등
+            continue
+        # 이름에 음식이 들어간 곳('○○마라탕')이 가장 정확하므로 0순위, 그다음 종류 순서대로
+        if any(k in p["place_name"] or k in p.get("category_name", "") for k in keywords):
+            match_rank = 0
+        else:
+            match_rank = want_rank.get(leaf, 99)
+        wanted = match_rank < 99
+        # 상황에 안 맞는 종류는 빼되, 사용자가 직접 먹고 싶다고 한 음식은 남긴다
+        if not kind_filter and not wanted and kind in rule["avoid"]:
             continue
         results.append({
             "id": p["id"],
@@ -274,9 +318,11 @@ def find_candidates(nearby, situation, kind_filter):
             "y": float(p["y"]),
             "distance": dist,
             "preferred": kind in rule["prefer"],
+            "wanted": wanted,
+            "_rank": match_rank,
         })
-    # 상황에 잘 맞는 종류 먼저, 그다음 검색한 장소에서 가까운 순
-    results.sort(key=lambda r: (not r["preferred"], r["distance"]))
+    # 먹고 싶다고 한 음식 먼저 → 상황에 잘 맞는 종류 → 검색한 장소에서 가까운 순
+    results.sort(key=lambda r: (r.pop("_rank"), not r["preferred"], r["distance"]))
     return results[:MAX_CANDIDATES]
 
 
@@ -472,7 +518,19 @@ def recommend():
     if not place.get("gps"):  # 현재 위치는 '바로 찾기' 목록에 남기지 않는다 (개인 위치라서)
         collector.remember_place(place["name"], place["x"], place["y"])
 
-    candidates = find_candidates(nearby, situation, conditions["kind"])
+    # AI 사용 제한은 추천 1번을 1회로 센다 (문장 해석 호출도 이 안에 포함)
+    limit_error = ai_limit_reason(request.remote_addr or "?") if nearby else None  # ProxyFix 덕분에 실제 접속자 IP
+
+    # 자유 문장에서 먹고 싶은 음식을 먼저 알아내서 그 음식점을 후보 앞쪽에 넣는다
+    # (예전에는 상황·거리만으로 20곳을 골라 '초밥 먹고 싶어'라고 해도 초밥집이 후보에 0곳이었다)
+    food = understand_food([conditions["wish"], *conditions["followups"]], nearby, use_ai=not limit_error)
+    candidates = find_candidates(nearby, situation, conditions["kind"], food)
+    if food:
+        # 화면·AI에 보여줄 이름: 종류 + (종류 이름에 이미 들어 있지 않은) 음식 이름
+        extra_words = [k for k in food["keywords"] if not any(k in c for c in food["categories"])]
+        conditions["food"] = {"labels": food["categories"] + extra_words,
+                              "avoid": food["avoid"],
+                              "found": sum(1 for r in candidates if r["wanted"])}
 
     # 재추천이면 지금까지 보여준 식당을 AI에게 알려준다 (실제 후보에 있는 ID만 인정, 순서 유지·중복 제거)
     # 직전 3곳만 알려주면 두 번째 재추천에서 처음 추천이 다시 나오는 문제가 있었다.
@@ -488,7 +546,7 @@ def recommend():
     ai_candidates = fresh if len(fresh) >= 3 else candidates
     ai_result, ai_error = None, None
     if candidates:
-        ai_error = ai_limit_reason(request.remote_addr or "?")  # ProxyFix 덕분에 실제 접속자 IP
+        ai_error = limit_error
         if not ai_error:
             ai_result, ai_error = recommend_with_ai(conditions, ai_candidates)
 

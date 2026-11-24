@@ -12,6 +12,13 @@
     {% if c.kind %}<span>{{ c.kind }}</span>{% endif %}
   </div>
   {% if c.wish %}<p class="hk-summary-wish">“{{ c.wish }}”</p>{% endif %}
+  {% if c.food and (c.food.labels or c.food.avoid) %}
+  <p class="hk-food-note">
+    {% if c.food.labels %}찾은 음식: <b>{{ c.food.labels|join(", ") }}</b>
+      {% if c.food.found %}· 후보 {{ c.food.found }}곳{% else %}· 1km 안에 없어요{% endif %}{% endif %}
+    {% if c.food.avoid %}<span>뺀 종류: {{ c.food.avoid|join(", ") }}</span>{% endif %}
+  </p>
+  {% endif %}
   {% if c.followups %}
   <ul class="hk-followups">
     {% for t in c.followups %}<li>{{ icon("plus") }} {{ t }}</li>{% endfor %}
