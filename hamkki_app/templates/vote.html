@@ -153,6 +153,36 @@
 {% endif %}
 
 <a href="{{ request.path }}" class="hk-back">↻ 결과 새로고침</a>
+
+{# 다른 사람이 투표하면 알아서 반영: 3초마다 '바뀐 게 있나?'만 묻는다 (폴링). #}
+{# 서버가 먼저 알려 주는 푸시(WebSocket·SSE)는 연결마다 스레드를 붙잡아, 동시 처리 4개뿐인 무료 서버에서 다른 기능을 막을 수 있어 쓰지 않았다 #}
+<button type="button" class="hk-refresh-note" id="hk-refresh-note" hidden>새 표가 들어왔어요 · 눌러서 보기</button>
+<script>
+(function () {
+  var sig = {{ vote_sig|tojson }};
+  var stateUrl = {{ url_for("vote_state", vote_id=vote.id)|tojson }};
+  var note = document.getElementById("hk-refresh-note");
+  var busy = false;   // 식당을 고르거나 이름을 치는 중이면 화면을 갑자기 바꾸지 않는다
+  document.querySelectorAll(".hk-vote-form input, .hk-owner select").forEach(function (el) {
+    el.addEventListener("input", function () { busy = true; });
+    el.addEventListener("change", function () { busy = true; });
+  });
+  function reload() { location.replace(location.pathname); }
+  note.addEventListener("click", reload);
+  function check() {
+    if (document.hidden) return;   // 다른 탭을 보는 중이면 묻지 않는다
+    fetch(stateUrl, { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok || d.sig === sig) return;
+        if (busy) { note.hidden = false; } else { reload(); }
+      })
+      .catch(function () {});
+  }
+  setInterval(check, 3000);   // 3초: 반영이 빠르면서 무료 서버에 부담이 적은 선
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) check(); });
+})();
+</script>
 <a href="{{ url_for('index') }}" class="hk-back" style="margin-left: 14px;">새로 추천받기</a>
 
 <script>

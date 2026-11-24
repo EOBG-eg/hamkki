@@ -76,6 +76,8 @@ python app.py                → http://localhost:5000
 
 8. 투표를 만든 브라우저(`owner` = `hk_voter` 쿠키)만 '여기로 결정' → `decided` 저장, 투표 마감, 모두에게 결정 식당·길찾기 배너. 결정 취소(reopen) 가능
    - 자동 마감(11/24): 추천 때 적은 인원(`expected_voters` = conditions.people, 2명 이상)이 모두 투표하고 1등이 한 곳이면 자동 결정(`decided.auto`). 동점이면 만든 사람에게 고르라고 안내. 만든 사람이 결정을 취소하면 `auto_close=False`로 자동 마감 끔. 화면에 'N명 중 M명 투표' 진행 막대
+   - 자동 새로고침(폴링): 투표 화면이 **3초**마다 `/vote/<id>/state`(투표 상태 해시 `vote_signature`)를 물어 바뀐 경우에만 새로고침. 고르거나 이름 치는 중이면 '새 표가 들어왔어요' 버튼만. 숨은 탭이면 묻지 않음
+   - 푸시(WebSocket·SSE)를 안 쓴 이유: 연결마다 스레드를 계속 붙잡는데 무료 서버는 동시 처리 4개(gunicorn 워커 1·스레드 4) → 투표 화면 4명이면 추천 등 다른 요청이 막힘. 바꾸려면 비동기 서버 + DB 알림(LISTEN/NOTIFY)이 필요해 발표 직전엔 위험. 투표는 몇 초 늦어도 되는 기능이라 폴링이 적절 (발표 질문 대비)
 9. Gemini 쿼터 보호(`ai_limit_reason`): IP당 10분 6회, 서버 전체 하루 `AI_DAILY_LIMIT`(기본 300). 넘으면 AI 없이 후보 목록. 메모리 기록이라 재시작 시 초기화
 10. 공유 미리보기(메신저 공통): base.html Open Graph + X(twitter:card) 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
 11. 현재 위치로 찾기: 브라우저 GPS → `/api/where`(카카오 coord2regioncode, 법정동 이름) → '현재 위치 · ○○동'. `place_source=gps`면 좌표를 소수 셋째 자리(약 100m)로 흐리고 '바로 찾기'(places.json)에 기록 안 함. https/localhost에서만 동작

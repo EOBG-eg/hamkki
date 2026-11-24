@@ -11,6 +11,7 @@
 실행:  python app.py   →  브라우저에서 http://localhost:5000
 """
 
+import hashlib
 import json
 import math
 import os
@@ -641,6 +642,25 @@ def _voter_token():
     return secrets.token_urlsafe(16)
 
 
+def vote_signature(vote):
+    """투표 상태를 짧은 문자열로 (누가 무엇에 투표했는지 + 결정). 바뀌었는지만 비교하는 데 쓴다."""
+    state = [sorted((v["name"], v["pick"]) for v in vote["votes"].values()),
+             (vote.get("decided") or {}).get("pick")]
+    return hashlib.sha1(json.dumps(state, ensure_ascii=False).encode()).hexdigest()[:12]
+
+
+@app.route("/vote/<vote_id>/state")
+def vote_state(vote_id):
+    """투표 화면이 몇 초마다 '바뀐 게 있나?'만 묻는 가벼운 주소 (화면 자동 새로고침용)"""
+    vote = vote_store.load_vote(vote_id)
+    if not vote:
+        return jsonify({"ok": False}), 404
+    resp = jsonify({"ok": True, "sig": vote_signature(vote), "total": len(vote["votes"]),
+                    "decided": bool(vote.get("decided"))})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/vote/<vote_id>", methods=["GET", "POST"])
 def vote_page(vote_id):
     vote = vote_store.load_vote(vote_id)
@@ -691,6 +711,7 @@ def vote_page(vote_id):
         is_new=request.args.get("new") == "1",
         just_voted=request.args.get("voted") == "1",
         share_url=url_for("vote_page", vote_id=vote_id, _external=True),
+        vote_sig=vote_signature(vote),
         map_data={"center": vote["center"], "points": map_points(vote["options"])},
         kakao_js_key=os.getenv("KAKAO_JS_KEY", ""),
     ))
