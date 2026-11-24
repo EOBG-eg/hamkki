@@ -655,6 +655,8 @@ def vote_state(vote_id):
     vote = vote_store.load_vote(vote_id)
     if not vote:
         return jsonify({"ok": False}), 404
+    if vote_store.settle(vote_id):   # 열어 둔 화면도 결과가 정해지면 바로 마감이 보이게
+        vote = vote_store.load_vote(vote_id)
     resp = jsonify({"ok": True, "sig": vote_signature(vote), "total": len(vote["votes"]),
                     "decided": bool(vote.get("decided"))})
     resp.headers["Cache-Control"] = "no-store"
@@ -666,6 +668,8 @@ def vote_page(vote_id):
     vote = vote_store.load_vote(vote_id)
     if not vote:
         return render_template("vote.html", vote=None, error="투표를 찾을 수 없어요. 링크를 다시 확인해 주세요."), 404
+    if vote_store.settle(vote_id):   # 이미 결과가 정해졌는데 열려 있으면 지금 마감
+        vote = vote_store.load_vote(vote_id)
 
     voter = _voter_token()
 

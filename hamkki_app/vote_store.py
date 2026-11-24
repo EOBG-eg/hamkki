@@ -134,13 +134,50 @@ def _apply_vote(vote, voter, name, pick):
         return False, f"이 투표는 최대 {MAX_VOTERS}명까지 참여할 수 있어요."
     votes[voter] = {"name": name, "pick": pick, "at": int(time.time())}
 
-    # 적은 인원이 모두 투표했고 1등이 한 곳이면 자동으로 결정 (동점이면 만든 사람이 고른다)
-    expected = expected_voters(vote)
-    if expected and vote.get("auto_close", True) and len(votes) >= expected:
-        _, leaders = tally(vote)
-        if len(leaders) == 1:
-            vote["decided"] = {"pick": leaders[0], "at": int(time.time()), "auto": True}
+    _auto_decide(vote)
     return True, None
+
+
+def _clinched(vote):
+    """
+    자동으로 결정할 수 있으면 그 식당 id, 아니면 None.
+    남은 사람(적은 인원 - 투표한 사람)이 모두 2등에 투표해도 1등을 못 따라잡으면 결정한다.
+      - 4명 중 3명이 같은 곳 → 3 > 0 + 1 → 결정
+      - 4명 중 2명이 같은 곳 → 2 > 0 + 2 아님 → 아직
+      - 모두 투표했는데 동점 → 결정하지 않음 (만든 사람이 고른다)
+    """
+    expected = expected_voters(vote)
+    if not expected or vote.get("decided") or not vote.get("auto_close", True):
+        return None
+    counts, _ = tally(vote)
+    ranked = sorted((len(names) for names in counts.values()), reverse=True)
+    first = ranked[0] if ranked else 0
+    second = ranked[1] if len(ranked) > 1 else 0
+    remaining = max(0, expected - len(vote["votes"]))
+    if first and first > second + remaining:
+        return next(i for i, names in counts.items() if len(names) == first)
+    return None
+
+
+def _auto_decide(vote):
+    """조건이 되면 vote에 자동 결정을 기록한다. 기록했으면 True"""
+    pick = _clinched(vote)
+    if pick:
+        vote["decided"] = {"pick": pick, "at": int(time.time()), "auto": True}
+        return True
+    return False
+
+
+def settle(vote_id):
+    """
+    화면을 열 때 확인: 이미 결과가 정해졌는데 아직 열려 있으면(자동 마감 기능 전에 들어온 표 등) 지금 결정한다.
+    읽기만으로 끝나는 경우가 대부분이라, 결정할 게 있을 때만 저장한다.
+    """
+    vote = load_vote(vote_id)
+    if not vote or not _clinched(vote):
+        return False
+    ok, _ = _update(vote_id, lambda v: (_auto_decide(v), None) if v else (False, None))
+    return ok
 
 
 def cast_vote(vote_id, voter, name, pick):
