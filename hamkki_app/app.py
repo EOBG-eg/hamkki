@@ -340,7 +340,7 @@ def index():
         budgets=BUDGETS,
         kinds=KINDS,
         quick=quick,
-        default_place=quick[0] if quick else "",
+        default_place="",   # 비워 둔다 (예전엔 가장 많이 검색된 곳을 채워서 누구에게나 '의정부역'이 보였음). 자주 찾는 곳은 '바로 찾기' 버튼으로
     )
 
 
