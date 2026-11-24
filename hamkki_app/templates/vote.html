@@ -27,7 +27,7 @@
 {# ---------- 최종 결정 ---------- #}
 {% if decided %}
 <section class="hk-decided">
-  <p class="hk-decided-label">{{ icon("check") }} 여기로 결정했어요!</p>
+  <p class="hk-decided-label">{{ icon("check") }} {{ "모두 투표했어요! 여기로 결정!" if decided_auto else "여기로 결정했어요!" }}</p>
   <h2>{{ decided.name }}</h2>
   <p class="hk-decided-meta">{{ decided.kind }}{% if decided.detail %} · {{ decided.detail }}{% endif %} · {{ c.region }}에서 {{ decided.distance }}m
     {% if counts[decided.id] %}· {{ counts[decided.id]|length }}표{% endif %}</p>
@@ -59,8 +59,11 @@
 {# ---------- 현재 결과 ---------- #}
 <section class="hk-ai">
   <p class="hk-ai-label">{{ icon("ballot") }} {{ "투표 결과" if decided else "어디로 갈까요?" }}</p>
+  {% set all_voted = expected and total >= expected %}
   {% if decided %}
     <p class="hk-vote-status">투표가 마감됐어요 · 총 {{ total }}명 참여</p>
+  {% elif all_voted and leaders|length > 1 %}
+    <p class="hk-vote-status"><strong>모두 투표했는데 {{ leaders|length }}곳이 동점이에요.</strong> 투표를 만든 분이 골라 주세요.</p>
   {% elif total == 0 %}
     <p class="hk-vote-status">아직 아무도 투표하지 않았어요. 첫 표를 던져 주세요!</p>
   {% elif leaders|length == 1 %}
@@ -69,6 +72,12 @@
     {% endfor %}
   {% else %}
     <p class="hk-vote-status">{{ leaders|length }}곳이 동점이에요 · 총 {{ total }}명 참여</p>
+  {% endif %}
+  {% if expected and not decided %}
+  <div class="hk-vote-progress" role="img" aria-label="{{ expected }}명 중 {{ total }}명 투표">
+    <span style="width: {{ [total * 100 // expected, 100]|min }}%"></span>
+  </div>
+  <p class="hk-vote-progress-text">{{ expected }}명 중 <strong>{{ total }}명</strong> 투표했어요{% if auto_on and not all_voted %} · 모두 투표하면 1등으로 자동 결정돼요{% endif %}</p>
   {% endif %}
   {% if just_voted and mine %}<p class="hk-vote-mine">{{ icon("check") }} {{ mine.name }}님의 표가 반영됐어요. 다시 고르면 표가 바뀌어요.</p>{% endif %}
 </section>

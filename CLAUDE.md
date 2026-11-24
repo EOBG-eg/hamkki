@@ -75,6 +75,7 @@ python app.py                → http://localhost:5000
 7. '친구들과 투표로 정하기' → `/vote/create`(추천 내용은 `SECRET_KEY`로 서명해 위조 방지) → `/vote/<id>` 공유 링크. 로그인 없이 이름+투표, 브라우저 쿠키(`hk_voter`)나 같은 이름이면 이전 표를 교체
 
 8. 투표를 만든 브라우저(`owner` = `hk_voter` 쿠키)만 '여기로 결정' → `decided` 저장, 투표 마감, 모두에게 결정 식당·길찾기 배너. 결정 취소(reopen) 가능
+   - 자동 마감(11/24): 추천 때 적은 인원(`expected_voters` = conditions.people, 2명 이상)이 모두 투표하고 1등이 한 곳이면 자동 결정(`decided.auto`). 동점이면 만든 사람에게 고르라고 안내. 만든 사람이 결정을 취소하면 `auto_close=False`로 자동 마감 끔. 화면에 'N명 중 M명 투표' 진행 막대
 9. Gemini 쿼터 보호(`ai_limit_reason`): IP당 10분 6회, 서버 전체 하루 `AI_DAILY_LIMIT`(기본 300). 넘으면 AI 없이 후보 목록. 메모리 기록이라 재시작 시 초기화
 10. 공유 미리보기(메신저 공통): base.html Open Graph + X(twitter:card) 태그 + `static/og.png`(1200×630, Pillow로 만든 이미지). 투표 화면은 지역·후보 이름/결정 식당으로 제목·설명 변경
 11. 현재 위치로 찾기: 브라우저 GPS → `/api/where`(카카오 coord2regioncode, 법정동 이름) → '현재 위치 · ○○동'. `place_source=gps`면 좌표를 소수 셋째 자리(약 100m)로 흐리고 '바로 찾기'(places.json)에 기록 안 함. https/localhost에서만 동작

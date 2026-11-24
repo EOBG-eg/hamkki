@@ -810,3 +810,9 @@ body {
 /* 결과 화면: 문장에서 찾은 음식 */
 .hk-food-note { font-size: .8rem; color: var(--hk-muted); margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .hk-food-note b { color: var(--hk-accent); font-weight: 700; }
+
+/* 투표 진행: 인원 중 몇 명 투표했는지 */
+.hk-vote-progress { height: 6px; border-radius: 999px; background: var(--hk-line); overflow: hidden; margin: 10px 0 4px; }
+.hk-vote-progress span { display: block; height: 100%; background: var(--hk-accent); border-radius: 999px; transition: width .3s; }
+.hk-vote-progress-text { font-size: .8rem; color: var(--hk-muted); margin: 0; }
+.hk-vote-progress-text strong { color: var(--hk-accent); }

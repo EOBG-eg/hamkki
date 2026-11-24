@@ -15,8 +15,12 @@ app.py는 어느 쪽인지 몰라도 된다. DB 오류는 db.DBError로 올라�
   "options": [ {id, name, kind, detail, address, url, route_url, x, y, distance, reason}, ... ],
   "votes": { "<브라우저 표시>": {"name": "유빈", "pick": "<식당 id>", "at": 1731200100} },
   "owner": "<만든 사람의 브라우저 표시>",   # 이 사람만 최종 결정·결정 취소 가능
-  "decided": {"pick": "<식당 id>", "at": 1731200200} 또는 null
+  "decided": {"pick": "<식당 id>", "at": 1731200200, "auto": true/false} 또는 null,
+  "auto_close": false   # 만든 사람이 결정을 취소하면 자동 마감을 끈다 (없으면 켜짐)
 }
+
+자동 마감: 조건에 적은 인원(예: 4명)이 모두 투표하면 1등으로 자동 결정한다.
+동점이면 결정하지 않고, 화면이 만든 사람에게 골라 달라고 안내한다.
 """
 
 import json
@@ -105,6 +109,15 @@ def clean_name(name):
     return " ".join((name or "").split())[:NAME_MAX]
 
 
+def expected_voters(vote):
+    """자동 마감 기준 인원 = 추천받을 때 적은 인원. 2명 미만이거나 없으면 None (혼밥 등)"""
+    try:
+        n = int((vote.get("conditions") or {}).get("people", 0))
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 2 else None
+
+
 def _apply_vote(vote, voter, name, pick):
     """투표 내용(vote)에 한 표를 반영한다. (성공 여부, 오류 문구)"""
     if not vote:
@@ -120,6 +133,13 @@ def _apply_vote(vote, voter, name, pick):
     if voter not in votes and len(votes) >= MAX_VOTERS:
         return False, f"이 투표는 최대 {MAX_VOTERS}명까지 참여할 수 있어요."
     votes[voter] = {"name": name, "pick": pick, "at": int(time.time())}
+
+    # 적은 인원이 모두 투표했고 1등이 한 곳이면 자동으로 결정 (동점이면 만든 사람이 고른다)
+    expected = expected_voters(vote)
+    if expected and vote.get("auto_close", True) and len(votes) >= expected:
+        _, leaders = tally(vote)
+        if len(leaders) == 1:
+            vote["decided"] = {"pick": leaders[0], "at": int(time.time()), "auto": True}
     return True, None
 
 
@@ -152,10 +172,11 @@ def decide(vote_id, voter, pick):
             return False, "투표를 만든 사람만 결정할 수 있어요."
         if pick is None:
             vote["decided"] = None
+            vote["auto_close"] = False   # 다시 열었으면 표가 바뀔 때마다 또 자동으로 닫히지 않게
             return True, None
         if pick not in {o["id"] for o in vote["options"]}:
             return False, "후보 중에서 골라 주세요."
-        vote["decided"] = {"pick": pick, "at": int(time.time())}
+        vote["decided"] = {"pick": pick, "at": int(time.time()), "auto": False}
         return True, None
 
     return _update(vote_id, change)
